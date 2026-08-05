@@ -25,24 +25,54 @@ Built for Apollo exports, but any CSV with an email column works.
 
 ## Google Cloud setup
 
-The Gmail API needs an OAuth client. This is a one time setup.
+The Gmail API needs your own OAuth client. This is a one time setup, about five
+minutes. Google reorganized these screens into the Google Auth platform, so older
+walkthroughs referring to "APIs and Services, OAuth consent screen" are stale.
 
 1. Open the [Google Cloud console](https://console.cloud.google.com/) and create a
-   project, or pick an existing one.
-2. Enable the Gmail API: APIs and Services, Library, search for Gmail API, Enable.
-3. Configure the OAuth consent screen: APIs and Services, OAuth consent screen.
-   - User type: External is fine for a personal account.
-   - Fill in the app name and your email.
-   - Under Audience, add your own Gmail address as a test user. Without this,
-     sign in fails with `access_denied`.
-4. Create the client: APIs and Services, Credentials, Create Credentials,
-   OAuth client ID.
-   - Application type: Desktop app.
-5. Download the JSON and save it as `credentials/client_secret.json` in this
-   repo. The `credentials/` directory is gitignored.
+   project, or pick an existing one. The project name does not matter.
 
-The app requests only the `gmail.compose` scope, which allows creating and
-deleting drafts. It cannot read your inbox.
+2. Enable the Gmail API. Go to
+   [APIs and Services, Library](https://console.cloud.google.com/apis/library),
+   search for `Gmail API`, and click Enable.
+
+3. Configure the consent screen at
+   [Google Auth platform, Branding](https://console.developers.google.com/auth/branding).
+   If you see "Google Auth platform not configured yet", click Get Started.
+   - App name: anything, for example `Draft Builder`. Only you will see it.
+   - User support email: your own address.
+   - Audience: External. Internal is only offered on Workspace accounts and
+     restricts the app to your organization.
+   - Contact information: your own address.
+   - Agree to the user data policy and click Create.
+
+4. Add yourself as a test user at
+   [Google Auth platform, Audience](https://console.developers.google.com/auth/audience).
+   Under Test users, click Add users, enter the Gmail address whose drafts you
+   want to create, and Save. Skipping this makes sign in fail with
+   `access_denied`, which is the most common setup mistake.
+
+5. Create the client at
+   [Google Auth platform, Clients](https://console.developers.google.com/auth/clients).
+   Click Create Client, set Application type to Desktop app, name it anything,
+   and click Create.
+
+6. Download the JSON with the download icon next to the new client, then save it
+   as `credentials/client_secret.json` in this repo. The filename must match
+   exactly. The `credentials/` directory is gitignored.
+
+You do not need to add scopes under Data Access. The app asks for the scope it
+needs at sign in time, and Google grants it because you are a test user on your
+own project.
+
+The app requests only `gmail.compose`, described by Google as "manage drafts and
+send emails". This app only ever creates and deletes drafts; it never calls the
+send endpoint. The scope cannot read your inbox. Google treats it as sensitive,
+which matters only if you later publish the app to other people; while it stays in
+testing with you as the test user, no review is involved.
+
+Because the app is unverified, Google shows a warning at sign in. Click Advanced,
+then "Go to ... (unsafe)". The app is your own code running on your own machine.
 
 ## Install and run
 
