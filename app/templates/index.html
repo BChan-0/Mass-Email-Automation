@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gmail Draft Builder</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header class="bar">
+  <h1>Gmail Draft Builder</h1>
+  <div class="bar-right">
+    <span id="account" class="pill pill-idle">Checking connection</span>
+    <button id="connect" type="button" class="btn btn-secondary">Connect Gmail</button>
+    <button id="disconnect" type="button" class="btn btn-quiet hidden">Disconnect</button>
+  </div>
+</header>
+
+<main>
+  <section class="card">
+    <h2>1. Contacts</h2>
+    <p class="hint">
+      Upload an Apollo export or any CSV with an email column. Name, company, and
+      title columns are matched automatically. Up to {{ max_contacts }} contacts
+      per batch.
+    </p>
+    <div class="row">
+      <label class="file-button">
+        <input id="csv-input" type="file" accept=".csv,text/csv" hidden>
+        Choose CSV
+      </label>
+      <span id="csv-summary" class="hint">No file loaded</span>
+    </div>
+    <div id="csv-detail" class="detail hidden"></div>
+  </section>
+
+  <section class="card">
+    <h2>2. Message</h2>
+    <p class="hint">
+      Wrap a field name in double braces to insert it, for example
+      <code>{{ '{{company}}' }}</code>. Add a fallback after a pipe:
+      <code>{{ '{{first_name|there}}' }}</code>.
+    </p>
+
+    <div
+      id="field-chips"
+      class="chips"
+      aria-label="Available fields"
+      data-default-fields="{{ known_fields | join(',') }}"
+    ></div>
+
+    <label class="field">
+      <span>Your name</span>
+      <input id="sender-name" type="text" placeholder="Bonnie Chan" value="{{ settings.sender_name }}">
+    </label>
+
+    <label class="field">
+      <span>Subject</span>
+      <input id="subject" type="text" value="{{ settings.subject_template }}">
+    </label>
+
+    <label class="field">
+      <span>Message</span>
+      <textarea id="body" rows="10">{{ settings.body_template }}</textarea>
+    </label>
+
+    <label class="field">
+      <span>Sign off</span>
+      <textarea id="signoff" rows="3">{{ settings.signoff_template }}</textarea>
+    </label>
+
+    <details class="more">
+      <summary>Cc, Bcc, and format</summary>
+      <div class="more-body">
+        <label class="field">
+          <span>Cc</span>
+          <input id="cc" type="text" placeholder="comma separated" value="{{ settings.cc }}">
+        </label>
+        <label class="field">
+          <span>Bcc</span>
+          <input id="bcc" type="text" placeholder="comma separated" value="{{ settings.bcc }}">
+        </label>
+        <label class="check">
+          <input id="send-as-html" type="checkbox" {% if settings.send_as_html %}checked{% endif %}>
+          <span>Also include an HTML version of the message</span>
+        </label>
+        <label class="check">
+          <input id="skip-incomplete" type="checkbox" {% if settings.skip_incomplete %}checked{% endif %}>
+          <span>Skip contacts with a missing field instead of drafting raw placeholders</span>
+        </label>
+      </div>
+    </details>
+
+    <div class="row">
+      <button id="save-settings" type="button" class="btn btn-quiet">Save as default</button>
+      <span id="save-status" class="hint"></span>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>3. Attachments</h2>
+    <p class="hint">Files added here are attached to every draft in the batch.</p>
+    <div class="row">
+      <label class="file-button">
+        <input id="attachment-input" type="file" hidden>
+        Add file
+      </label>
+      <span id="attachment-summary" class="hint">No attachments</span>
+    </div>
+    <ul id="attachment-list" class="list"></ul>
+  </section>
+
+  <section class="card">
+    <h2>4. Preview and create</h2>
+    <div class="row">
+      <button id="preview" type="button" class="btn btn-secondary">Preview first {{ preview_limit }}</button>
+      <button id="create" type="button" class="btn btn-primary" disabled>Create drafts</button>
+      <span id="create-status" class="hint"></span>
+    </div>
+    <div id="preview-area" class="preview hidden"></div>
+  </section>
+
+  <section class="card">
+    <h2>5. Batches</h2>
+    <p class="hint">
+      Every run is recorded here. Delete removes only the drafts this app created,
+      so drafts you wrote by hand are never touched.
+    </p>
+    <div class="row">
+      <button id="refresh-batches" type="button" class="btn btn-quiet">Refresh</button>
+    </div>
+    <div id="batch-area" class="batches"></div>
+  </section>
+</main>
+
+<div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

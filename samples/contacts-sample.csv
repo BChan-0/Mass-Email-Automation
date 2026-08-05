@@ -1,0 +1,6 @@
+First Name,Last Name,Title,Company,Email,Seniority,City
+Ada,Lovelace,VP Engineering,Analytical Engines,ada@engines.example,vp,London
+Grace,Hopper,Chief Scientist,Compiler Works,grace@compilers.example,c_suite,New York
+Katherine,Johnson,Director of Research,Orbital Analytics,katherine@orbital.example,director,Hampton
+Alan,Turing,,Bletchley Labs,alan@bletchley.example,director,Bletchley
+Locked,Contact,Engineer,Hidden Co,email_not_unlocked,manager,Seattle

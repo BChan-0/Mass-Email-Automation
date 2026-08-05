@@ -1,0 +1,20 @@
+# Secrets: never commit OAuth client secrets or tokens
+credentials/
+*.json.token
+token.json
+client_secret*.json
+
+# Runtime data: saved settings and batch records
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# macOS
+.DS_Store
