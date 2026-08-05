@@ -32,6 +32,24 @@
       <span id="csv-summary" class="hint">No file loaded</span>
     </div>
     <div id="csv-detail" class="detail hidden"></div>
+
+    <div id="contacts-panel" class="hidden">
+      <div class="row">
+        <button id="toggle-contacts" type="button" class="btn btn-quiet btn-small">Show contact table</button>
+        <span id="contacts-status" class="hint"></span>
+      </div>
+      <div id="contacts-table-wrap" class="table-wrap hidden">
+        <p class="hint">
+          Edit a cell to correct a value, or remove a row to leave that person out.
+          Changes apply to this session only; the uploaded file is not altered.
+        </p>
+        <table id="contacts-table" class="grid"></table>
+        <div class="row">
+          <button id="save-contacts" type="button" class="btn btn-secondary btn-small">Apply changes</button>
+          <button id="reload-contacts" type="button" class="btn btn-quiet btn-small">Discard changes</button>
+        </div>
+      </div>
+    </div>
   </section>
 
   <section class="card">
@@ -41,6 +59,15 @@
       <code>{{ '{{company}}' }}</code>. Add a fallback after a pipe:
       <code>{{ '{{first_name|there}}' }}</code>.
     </p>
+
+    <label class="check">
+      <input id="use-markdown" type="checkbox" {% if settings.use_markdown %}checked{% endif %}>
+      <span>
+        Write in Markdown. <code>**bold**</code>, <code>*italic*</code>,
+        <code>- lists</code>, and <code>[links](https://example.com)</code> are
+        formatted in the sent message. Preview shows the formatted result.
+      </span>
+    </label>
 
     <div
       id="field-chips"

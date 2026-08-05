@@ -21,7 +21,7 @@ from .config import (
     Paths,
     paths_from_env,
 )
-from .contacts import ParseResult, parse_csv
+from .contacts import ParseResult, is_valid_email, parse_csv
 from .drafts import TemplateSet, create_drafts, delete_drafts, render_all
 from .gmail_client import (
     AuthError,
@@ -37,9 +37,13 @@ from .history import (
     load_suppression_list,
     normalize_address,
 )
+from .markup import looks_like_markdown, render_markdown
 from .message import Attachment
 from .store import BatchStore, load_settings, save_settings
 from .templating import KNOWN_FIELDS, find_placeholders
+
+# Contact fields the table lets you edit. Other CSV columns stay as imported.
+EDITABLE_FIELDS = ("email", "first_name", "last_name", "company", "title")
 
 
 def _decode_csv(raw: bytes) -> str:
@@ -62,6 +66,7 @@ def _templates_from(payload: dict) -> TemplateSet:
         cc=str(payload.get("cc", "")),
         bcc=str(payload.get("bcc", "")),
         send_as_html=bool(payload.get("send_as_html", False)),
+        use_markdown=bool(payload.get("use_markdown", False)),
     )
 
 
@@ -224,6 +229,102 @@ def create_app(paths: Paths | None = None) -> Flask:
             }
         )
 
+    @app.get("/api/contacts")
+    def get_contacts():
+        """Return the parsed contacts so the UI can show an editable table."""
+        csv_id = str(request.args.get("csv_id") or session.get("csv_id") or "")
+        parsed = csv_cache.get(csv_id)
+        if parsed is None:
+            return jsonify({"ok": False, "error": "Upload a CSV first."}), 400
+
+        return jsonify(
+            {
+                "ok": True,
+                "csv_id": csv_id,
+                "editable_fields": list(EDITABLE_FIELDS),
+                "contacts": [
+                    {
+                        "index": index,
+                        "row_number": contact.row_number,
+                        "email": contact.email,
+                        "first_name": contact.first_name,
+                        "last_name": contact.last_name,
+                        "company": contact.company,
+                        "title": contact.title,
+                    }
+                    for index, contact in enumerate(parsed.contacts)
+                ],
+            }
+        )
+
+    @app.post("/api/contacts")
+    def post_contacts():
+        """Apply edits to the parsed contacts held for this upload.
+
+        Edits live only in this process, alongside the parsed CSV. The uploaded file
+        is never rewritten, so the original export stays as it was.
+        """
+        payload = request.get_json(silent=True) or {}
+        csv_id = str(payload.get("csv_id") or session.get("csv_id") or "")
+        parsed = csv_cache.get(csv_id)
+        if parsed is None:
+            return jsonify({"ok": False, "error": "Upload a CSV first."}), 400
+
+        edits = payload.get("edits")
+        removals = payload.get("remove")
+        # Either half is optional, so removing rows without editing any is allowed.
+        if not isinstance(edits, list) and not isinstance(removals, list):
+            return jsonify({"ok": False, "error": "No edits or removals given."}), 400
+        if not isinstance(edits, list):
+            edits = []
+
+        applied = 0
+        rejected = []
+        for edit in edits:
+            if not isinstance(edit, dict):
+                continue
+            try:
+                index = int(edit.get("index", -1))
+            except (TypeError, ValueError):
+                continue
+            if not 0 <= index < len(parsed.contacts):
+                continue
+
+            contact = parsed.contacts[index]
+            for field_name in EDITABLE_FIELDS:
+                if field_name not in edit:
+                    continue
+                value = str(edit[field_name] or "").strip()
+                if field_name == "email":
+                    if not is_valid_email(value):
+                        rejected.append({"index": index, "email": value, "reason": "not a usable address"})
+                        continue
+                    contact.email = value
+                else:
+                    setattr(contact, field_name, value)
+                # Keep the raw column view in step so templates referencing a CSV
+                # header see the edited value too.
+                contact.extra[field_name] = getattr(contact, field_name)
+            applied += 1
+
+        removed = 0
+        if isinstance(removals, list):
+            drop = {int(item) for item in removals if str(item).lstrip("-").isdigit()}
+            if drop:
+                kept = [contact for index, contact in enumerate(parsed.contacts) if index not in drop]
+                removed = len(parsed.contacts) - len(kept)
+                parsed.contacts[:] = kept
+
+        return jsonify(
+            {
+                "ok": True,
+                "applied": applied,
+                "removed": removed,
+                "rejected": rejected,
+                "contact_count": len(parsed.contacts),
+            }
+        )
+
     @app.post("/api/upload-attachment")
     def upload_attachment():
         """Stage a file to attach to every draft in the next batch."""
@@ -303,11 +404,17 @@ def create_app(paths: Paths | None = None) -> Flask:
                     | set(find_placeholders(templates.body_template))
                     | set(find_placeholders(templates.signoff_template))
                 ),
+                "use_markdown": templates.use_markdown,
+                "markdown_unused": (
+                    not templates.use_markdown
+                    and looks_like_markdown(templates.body_template + templates.signoff_template)
+                ),
                 "drafts": [
                     {
                         "to": item.contact.email,
                         "subject": item.subject,
                         "body": item.body,
+                        "html": render_markdown(item.body) if templates.use_markdown else "",
                         "missing": item.missing,
                     }
                     for item in rendered

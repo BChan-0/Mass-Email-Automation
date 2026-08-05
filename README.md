@@ -12,7 +12,9 @@ rows with no usable address. Every dropped row is reported with a reason.
 ## What it does
 
 - Upload a CSV and match name, email, company, and title columns automatically
+- Review contacts in a table, correct any cell, and drop rows you do not want
 - Write a subject, message, and sign off with `{{placeholders}}` per contact
+- Write in Markdown for bold, italics, lists, and links
 - Preview the first few rendered messages before creating anything
 - Attach one or more files to every draft in a batch
 - Create one Gmail draft per contact
@@ -145,9 +147,11 @@ somewhere other than the repo. `GDB_ROOT` does the same as `--root`.
    warn that the app is unverified because it is your own client; continue past
    it. The token is saved to `credentials/token.json`.
 2. Contacts: choose your CSV. The app reports how many contacts it found, which
-   columns it matched, and which rows it dropped and why.
+   columns it matched, and which rows it dropped and why. Click
+   `Show contact table` to check the parsed rows, fix any cell, or remove a row,
+   then `Apply changes`.
 3. Message: write the subject, message, and sign off. Click a field chip to
-   insert a placeholder at the cursor.
+   insert a placeholder at the cursor. Tick `Write in Markdown` for formatting.
 4. Attachments: add files to include in every draft in the batch.
 5. Preview: render the first few messages and check them.
 6. Create drafts: one draft per contact. Nothing is sent.
@@ -223,6 +227,48 @@ Same operations without a browser.
 ```
 
 Arguments not given fall back to whatever was saved from the UI.
+
+## Editing contacts before drafting
+
+`Show contact table` lists every parsed contact with the email, name, company, and
+title in editable cells, alongside the CSV row number so a value can be traced back
+to the export. Fix a cell, or use Remove to leave someone out, then click
+`Apply changes`.
+
+Edits live in memory next to the parsed CSV. The uploaded file is never rewritten,
+so the original export is untouched, and `Discard changes` reloads from it. A
+restart clears edits along with the upload.
+
+An edited address is validated the same way an imported one is. A value that is not
+usable is rejected and the previous address kept, rather than silently drafting to
+something malformed.
+
+## Writing in Markdown
+
+Tick `Write in Markdown` to use formatting in the message:
+
+| Syntax | Result |
+|---|---|
+| `**bold**` | bold |
+| `*italic*` | italic |
+| `- item` | bullet list |
+| `1. item` | numbered list |
+| `[text](https://example.com)` | link |
+| `# Heading` | heading |
+| `> quoted` | block quote |
+
+Preview then shows two tabs, the formatted result and the Markdown source. Drafts
+are sent as two parts: the Markdown source as plain text, and the formatted HTML as
+the alternative, so a client that cannot show HTML still gets readable text.
+
+Rendered HTML is sanitized. A message body carries values from the uploaded CSV,
+which is third party data, and Markdown passes raw HTML through by default, so a
+crafted cell could otherwise inject script into the preview page or the message.
+Images, styles, and tables are stripped along with scripts, since mail clients
+handle them inconsistently.
+
+If the message looks like it contains Markdown while the option is off, preview says
+so rather than quietly sending literal asterisks.
 
 ## Never emailing the same person twice
 
@@ -310,6 +356,7 @@ does not need Gmail credentials:
 | `app/contacts.py` | CSV parsing and column matching |
 | `app/templating.py` | Placeholder substitution |
 | `app/history.py` | Prior contact checks and the do not contact list |
+| `app/markup.py` | Markdown rendering and HTML sanitizing |
 | `app/drafts.py` | Rendering and batch create and delete |
 | `app/gmail_client.py` | OAuth and Gmail draft calls |
 | `app/message.py` | MIME assembly |

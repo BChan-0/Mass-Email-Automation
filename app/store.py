@@ -26,6 +26,7 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "cc": "",
     "bcc": "",
     "send_as_html": False,
+    "use_markdown": False,
     "skip_incomplete": True,
     "skip_previously_emailed": True,
 }

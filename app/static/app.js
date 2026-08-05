@@ -53,6 +53,7 @@ function templatePayload() {
     cc: el("cc").value,
     bcc: el("bcc").value,
     send_as_html: el("send-as-html").checked,
+    use_markdown: el("use-markdown").checked,
     skip_incomplete: el("skip-incomplete").checked,
     skip_previously_emailed: el("skip-previously-emailed").checked,
   };
@@ -146,6 +147,8 @@ async function uploadCsv(file) {
         ? result.available_fields.concat("sender_name")
         : defaultFields()
     );
+    el("contacts-panel").classList.remove("hidden");
+    await loadContacts();
     toast(`Loaded ${result.contact_count} contacts`);
   } catch (error) {
     state.csvId = null;
@@ -188,6 +191,123 @@ function renderCsvDetail(result) {
   }
 
   detail.classList.remove("hidden");
+}
+
+// Contact table
+
+const EMAIL_SHAPE = /^[^@\s,;<>]+@[^@\s,;<>]+\.[A-Za-z]{2,}$/;
+
+const contactState = { rows: [], fields: [], dropped: new Set() };
+
+async function loadContacts() {
+  if (!state.csvId) return;
+  try {
+    const result = await api(`/api/contacts?csv_id=${encodeURIComponent(state.csvId)}`);
+    contactState.rows = result.contacts;
+    contactState.fields = result.editable_fields;
+    contactState.dropped = new Set();
+    renderContactTable();
+    el("contacts-status").textContent = `${result.contacts.length} row(s)`;
+  } catch (error) {
+    el("contacts-status").textContent = error.message;
+  }
+}
+
+function renderContactTable() {
+  const table = el("contacts-table");
+  table.textContent = "";
+
+  const head = table.createTHead().insertRow();
+  ["CSV row", ...contactState.fields.map(fieldLabel), ""].forEach((title) => {
+    const cell = document.createElement("th");
+    cell.textContent = title;
+    head.appendChild(cell);
+  });
+
+  const body = table.createTBody();
+  contactState.rows.forEach((contact) => {
+    const row = body.insertRow();
+    row.dataset.index = String(contact.index);
+
+    const number = row.insertCell();
+    number.className = "row-number";
+    number.textContent = String(contact.row_number);
+
+    contactState.fields.forEach((field) => {
+      const cell = row.insertCell();
+      const input = document.createElement("input");
+      input.type = "text";
+      input.value = contact[field] || "";
+      input.dataset.field = field;
+      input.dataset.index = String(contact.index);
+      input.addEventListener("input", () => {
+        if (field === "email") {
+          input.classList.toggle("invalid", !EMAIL_SHAPE.test(input.value.trim()));
+        }
+      });
+      cell.appendChild(input);
+    });
+
+    const actions = row.insertCell();
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "btn btn-quiet btn-small";
+    remove.textContent = contactState.dropped.has(contact.index) ? "Keep" : "Remove";
+    remove.addEventListener("click", () => {
+      if (contactState.dropped.has(contact.index)) {
+        contactState.dropped.delete(contact.index);
+      } else {
+        contactState.dropped.add(contact.index);
+      }
+      row.classList.toggle("dropped", contactState.dropped.has(contact.index));
+      remove.textContent = contactState.dropped.has(contact.index) ? "Keep" : "Remove";
+    });
+    actions.appendChild(remove);
+  });
+}
+
+function fieldLabel(field) {
+  return field.replace(/_/g, " ").replace(/^./, (letter) => letter.toUpperCase());
+}
+
+async function saveContacts() {
+  const inputs = Array.from(el("contacts-table").querySelectorAll("input[data-field]"));
+  const byIndex = new Map();
+  inputs.forEach((input) => {
+    const index = Number(input.dataset.index);
+    if (contactState.dropped.has(index)) return;
+    if (!byIndex.has(index)) byIndex.set(index, { index });
+    byIndex.get(index)[input.dataset.field] = input.value;
+  });
+
+  const invalid = inputs.filter((input) => input.classList.contains("invalid"));
+  if (invalid.length) {
+    toast(`${invalid.length} address(es) do not look valid. Fix them or remove the row.`, true);
+    return;
+  }
+
+  try {
+    const result = await postJson("/api/contacts", {
+      csv_id: state.csvId,
+      edits: Array.from(byIndex.values()),
+      remove: Array.from(contactState.dropped),
+    });
+    state.contactCount = result.contact_count;
+    el("csv-summary").textContent = `${state.filename}: ${result.contact_count} contacts`;
+    const parts = [];
+    if (result.applied) parts.push(`${result.applied} row(s) updated`);
+    if (result.removed) parts.push(`${result.removed} removed`);
+    el("contacts-status").textContent = parts.join(", ") || "No changes";
+    if (result.rejected?.length) {
+      toast(`${result.rejected.length} address(es) rejected: ${result.rejected[0].reason}`, true);
+    } else {
+      toast(parts.join(", ") || "No changes to apply");
+    }
+    await loadContacts();
+    updateCreateButton();
+  } catch (error) {
+    toast(error.message, true);
+  }
 }
 
 // Attachments
@@ -235,6 +355,51 @@ async function uploadAttachment(file) {
 
 // Preview
 
+// Shows the formatted result and the Markdown source behind two tabs. The HTML is
+// sanitized server side, in app/markup.py, before it reaches this point.
+function buildBodyTabs(draft) {
+  const wrap = document.createElement("div");
+
+  const tabs = document.createElement("div");
+  tabs.className = "tabs";
+  const formatted = document.createElement("button");
+  formatted.type = "button";
+  formatted.className = "tab active";
+  formatted.textContent = "Formatted";
+  const source = document.createElement("button");
+  source.type = "button";
+  source.className = "tab";
+  source.textContent = "Markdown source";
+  tabs.appendChild(formatted);
+  tabs.appendChild(source);
+  wrap.appendChild(tabs);
+
+  const htmlView = document.createElement("div");
+  htmlView.className = "draft-html";
+  htmlView.innerHTML = draft.html;
+  wrap.appendChild(htmlView);
+
+  const textView = document.createElement("pre");
+  textView.className = "draft-body hidden";
+  textView.textContent = draft.body;
+  wrap.appendChild(textView);
+
+  formatted.addEventListener("click", () => {
+    formatted.classList.add("active");
+    source.classList.remove("active");
+    htmlView.classList.remove("hidden");
+    textView.classList.add("hidden");
+  });
+  source.addEventListener("click", () => {
+    source.classList.add("active");
+    formatted.classList.remove("active");
+    textView.classList.remove("hidden");
+    htmlView.classList.add("hidden");
+  });
+
+  return wrap;
+}
+
 async function runPreview() {
   if (!state.csvId) {
     toast("Upload a CSV first", true);
@@ -256,6 +421,14 @@ async function runPreview() {
         : " Every contact has all the fields the template uses.");
     area.appendChild(summary);
 
+    if (result.markdown_unused) {
+      const nudge = document.createElement("div");
+      nudge.className = "warn";
+      nudge.textContent =
+        "This message looks like it uses Markdown, but Markdown is off, so the syntax will be sent literally.";
+      area.appendChild(nudge);
+    }
+
     result.drafts.forEach((draft) => {
       const card = document.createElement("div");
       card.className = "draft";
@@ -270,10 +443,14 @@ async function runPreview() {
       subject.textContent = draft.subject;
       card.appendChild(subject);
 
-      const body = document.createElement("pre");
-      body.className = "draft-body";
-      body.textContent = draft.body;
-      card.appendChild(body);
+      if (draft.html) {
+        card.appendChild(buildBodyTabs(draft));
+      } else {
+        const body = document.createElement("pre");
+        body.className = "draft-body";
+        body.textContent = draft.body;
+        card.appendChild(body);
+      }
 
       if (draft.missing?.length) {
         const missing = document.createElement("div");
@@ -684,6 +861,17 @@ function wire() {
       el("save-status").textContent = error.message;
       el("save-status").className = "error";
     }
+  });
+
+  el("toggle-contacts").addEventListener("click", () => {
+    const wrap = el("contacts-table-wrap");
+    const hidden = wrap.classList.toggle("hidden");
+    el("toggle-contacts").textContent = hidden ? "Show contact table" : "Hide contact table";
+  });
+  el("save-contacts").addEventListener("click", saveContacts);
+  el("reload-contacts").addEventListener("click", async () => {
+    await loadContacts();
+    toast("Reloaded from the uploaded file");
   });
 
   el("preview").addEventListener("click", runPreview);

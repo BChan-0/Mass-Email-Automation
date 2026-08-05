@@ -163,6 +163,148 @@ def test_create_drafts_rejects_an_empty_subject(client, connected, apollo_csv):
     assert "Subject template is empty" in response.get_json()["error"]
 
 
+def test_contacts_are_returned_for_the_table(client, apollo_csv):
+    csv_id = upload(client, apollo_csv).get_json()["csv_id"]
+
+    payload = client.get(f"/api/contacts?csv_id={csv_id}").get_json()
+
+    assert len(payload["contacts"]) == 3
+    first = payload["contacts"][0]
+    assert first["email"] == "ada@engines.example"
+    assert first["company"] == "Analytical Engines"
+    assert first["row_number"] == 2
+    assert "email" in payload["editable_fields"]
+
+
+def test_contacts_needs_an_upload_first(client):
+    assert client.get("/api/contacts").status_code == 400
+
+
+def test_editing_a_contact_changes_what_is_drafted(client, connected, apollo_csv):
+    csv_id = upload(client, apollo_csv).get_json()["csv_id"]
+
+    edited = client.post(
+        "/api/contacts",
+        json={
+            "csv_id": csv_id,
+            "edits": [{"index": 0, "first_name": "Augusta", "title": "Countess"}],
+        },
+    ).get_json()
+
+    assert edited["applied"] == 1
+    preview = client.post(
+        "/api/preview",
+        json={"csv_id": csv_id, "subject_template": "Hi {{first_name}}", "body_template": "{{title}}"},
+    ).get_json()
+    assert preview["drafts"][0]["subject"] == "Hi Augusta"
+    assert "Countess" in preview["drafts"][0]["body"]
+
+
+def test_a_corrected_address_is_used(client, apollo_csv):
+    csv_id = upload(client, apollo_csv).get_json()["csv_id"]
+
+    client.post(
+        "/api/contacts",
+        json={"csv_id": csv_id, "edits": [{"index": 0, "email": "ada.fixed@engines.example"}]},
+    )
+
+    contacts = client.get(f"/api/contacts?csv_id={csv_id}").get_json()["contacts"]
+    assert contacts[0]["email"] == "ada.fixed@engines.example"
+
+
+def test_an_invalid_edited_address_is_rejected_and_the_old_one_kept(client, apollo_csv):
+    csv_id = upload(client, apollo_csv).get_json()["csv_id"]
+
+    payload = client.post(
+        "/api/contacts",
+        json={"csv_id": csv_id, "edits": [{"index": 0, "email": "not-an-address"}]},
+    ).get_json()
+
+    assert len(payload["rejected"]) == 1
+    contacts = client.get(f"/api/contacts?csv_id={csv_id}").get_json()["contacts"]
+    assert contacts[0]["email"] == "ada@engines.example"
+
+
+def test_removing_a_row_drops_it_from_the_batch(client, connected, apollo_csv):
+    csv_id = upload(client, apollo_csv).get_json()["csv_id"]
+
+    removed = client.post("/api/contacts", json={"csv_id": csv_id, "remove": [1]}).get_json()
+
+    assert removed["removed"] == 1
+    assert removed["contact_count"] == 2
+    created = client.post(
+        "/api/create-drafts",
+        json={"csv_id": csv_id, "subject_template": "Hi", "body_template": "Body"},
+    ).get_json()
+    assert created["created"] == 2
+    assert "grace@compilers.example" not in [draft["to"] for draft in connected.drafts.values()]
+
+
+def test_an_out_of_range_edit_is_ignored(client, apollo_csv):
+    csv_id = upload(client, apollo_csv).get_json()["csv_id"]
+
+    payload = client.post(
+        "/api/contacts",
+        json={"csv_id": csv_id, "edits": [{"index": 99, "first_name": "Nobody"}]},
+    ).get_json()
+
+    assert payload["applied"] == 0
+    assert payload["contact_count"] == 3
+
+
+def test_contacts_endpoint_rejects_a_bad_payload(client, apollo_csv):
+    csv_id = upload(client, apollo_csv).get_json()["csv_id"]
+
+    assert client.post("/api/contacts", json={"csv_id": csv_id}).status_code == 400
+
+
+def test_preview_returns_rendered_html_in_markdown_mode(client, apollo_csv):
+    csv_id = upload(client, apollo_csv).get_json()["csv_id"]
+
+    payload = client.post(
+        "/api/preview",
+        json={
+            "csv_id": csv_id,
+            "subject_template": "Hi",
+            "body_template": "Hello **{{first_name}}**",
+            "use_markdown": True,
+        },
+    ).get_json()
+
+    assert payload["use_markdown"] is True
+    assert "<strong>Ada</strong>" in payload["drafts"][0]["html"]
+    assert "**Ada**" in payload["drafts"][0]["body"]
+
+
+def test_preview_warns_when_markdown_is_off_but_present(client, apollo_csv):
+    csv_id = upload(client, apollo_csv).get_json()["csv_id"]
+
+    payload = client.post(
+        "/api/preview",
+        json={"csv_id": csv_id, "subject_template": "Hi", "body_template": "Hello **there**"},
+    ).get_json()
+
+    assert payload["markdown_unused"] is True
+    assert payload["drafts"][0]["html"] == ""
+
+
+def test_markdown_reaches_the_created_draft(client, connected, apollo_csv):
+    csv_id = upload(client, apollo_csv).get_json()["csv_id"]
+
+    client.post(
+        "/api/create-drafts",
+        json={
+            "csv_id": csv_id,
+            "subject_template": "Hi",
+            "body_template": "Hello **{{first_name}}**",
+            "use_markdown": True,
+        },
+    )
+
+    raw = next(iter(connected.drafts.values()))["raw"].decode("utf-8", "replace")
+    assert "<strong>" in raw or "strong" in raw
+
+
 def test_attachment_is_staged_and_can_be_removed(client):
     staged = client.post(
         "/api/upload-attachment",

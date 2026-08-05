@@ -54,6 +54,7 @@ def _templates(arguments, paths: Paths) -> TemplateSet:
         cc=arguments.cc or "",
         bcc=arguments.bcc or "",
         send_as_html=arguments.html,
+        use_markdown=arguments.markdown,
     )
 
 
@@ -253,6 +254,11 @@ def build_parser() -> argparse.ArgumentParser:
         target.add_argument("--cc", default=None, help="comma separated Cc addresses")
         target.add_argument("--bcc", default=None, help="comma separated Bcc addresses")
         target.add_argument("--html", action="store_true", help="include an HTML version of the message")
+        target.add_argument(
+            "--markdown",
+            action="store_true",
+            help="read the message as Markdown and send formatted HTML alongside it",
+        )
 
     preview = subparsers.add_parser("preview", help="render drafts without touching Gmail")
     add_template_arguments(preview)

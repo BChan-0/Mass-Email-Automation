@@ -37,6 +37,7 @@ class TemplateSet:
     cc: str = ""
     bcc: str = ""
     send_as_html: bool = False
+    use_markdown: bool = False
 
 
 def render_one(contact: Contact, templates: TemplateSet) -> RenderedDraft:
@@ -169,7 +170,9 @@ def create_drafts(
                 cc=templates.cc,
                 bcc=templates.bcc,
                 attachments=attachments,
-                as_html=templates.send_as_html,
+                # Markdown implies an HTML part, or the formatting would be lost.
+                as_html=templates.send_as_html or templates.use_markdown,
+                as_markdown=templates.use_markdown,
             )
         except ValueError as error:
             # One malformed row should not abort the rest of the batch.

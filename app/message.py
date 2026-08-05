@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from email.message import EmailMessage
 from pathlib import Path
 
+from .markup import render_markdown
+
 
 @dataclass(frozen=True)
 class Attachment:
@@ -41,8 +43,16 @@ def sanitize_header(value: str) -> str:
     return " ".join((value or "").split())
 
 
-def body_to_html(body: str) -> str:
-    """Convert plain text into HTML, preserving paragraph and line breaks."""
+def body_to_html(body: str, *, as_markdown: bool = False) -> str:
+    """Convert a message body into HTML.
+
+    :param body: rendered body text
+    :param as_markdown: treat the body as Markdown rather than plain text
+    :returns: HTML for the alternative part
+    """
+    if as_markdown:
+        return render_markdown(body) or "<p></p>"
+
     from html import escape
 
     paragraphs = [block.strip() for block in (body or "").replace("\r\n", "\n").split("\n\n")]
@@ -60,17 +70,19 @@ def build_message(
     bcc: str = "",
     attachments: list[Attachment] | None = None,
     as_html: bool = False,
+    as_markdown: bool = False,
 ) -> EmailMessage:
     """Assemble a single message.
 
     :param to: recipient address
     :param subject: rendered subject line
-    :param body: rendered plain text body, including the sign off
+    :param body: rendered body, including the sign off
     :param sender: From address; left unset so Gmail fills in the authorized user
     :param cc: comma separated Cc addresses
     :param bcc: comma separated Bcc addresses
     :param attachments: files to attach to this message
-    :param as_html: also send an HTML alternative built from the plain text
+    :param as_html: also send an HTML alternative built from the body
+    :param as_markdown: read the body as Markdown when building that alternative
     :returns: the assembled message
     """
     message = EmailMessage()
@@ -84,9 +96,10 @@ def build_message(
     if bcc:
         message["Bcc"] = sanitize_header(bcc)
 
+    # The plain text part keeps the Markdown source, which stays readable as text.
     message.set_content(body or "")
     if as_html:
-        message.add_alternative(body_to_html(body), subtype="html")
+        message.add_alternative(body_to_html(body, as_markdown=as_markdown), subtype="html")
 
     for attachment in attachments or []:
         main_type, _, sub_type = attachment.mime_type.partition("/")

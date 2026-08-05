@@ -87,6 +87,57 @@ def test_body_keeps_its_newlines():
     assert "Line one\nLine two" in message.get_content()
 
 
+def test_markdown_bodies_produce_formatted_html():
+    message = build_message(
+        to="a@b.example",
+        subject="S",
+        body="Hi **Ada**,\n\n- one\n- two\n",
+        as_html=True,
+        as_markdown=True,
+    )
+    parts = {part.get_content_subtype(): part for part in message.walk() if not part.is_multipart()}
+
+    assert "<strong>Ada</strong>" in parts["html"].get_content()
+    assert parts["html"].get_content().count("<li>") == 2
+    # The plain text part keeps the Markdown source, which reads fine as text.
+    assert "**Ada**" in parts["plain"].get_content()
+
+
+def test_markdown_html_is_sanitized_in_the_message():
+    message = build_message(
+        to="a@b.example",
+        subject="S",
+        body="Hi <script>alert(1)</script> **Ada**",
+        as_html=True,
+        as_markdown=True,
+    )
+    html = next(
+        part.get_content()
+        for part in message.walk()
+        if not part.is_multipart() and part.get_content_subtype() == "html"
+    )
+
+    assert "<script" not in html.lower()
+    assert "<strong>Ada</strong>" in html
+
+
+def test_markdown_off_escapes_syntax_rather_than_rendering_it():
+    message = build_message(to="a@b.example", subject="S", body="Hi **Ada**", as_html=True)
+    html = next(
+        part.get_content()
+        for part in message.walk()
+        if not part.is_multipart() and part.get_content_subtype() == "html"
+    )
+
+    assert "<strong>" not in html
+    assert "**Ada**" in html
+
+
+def test_body_to_html_renders_markdown_on_request():
+    assert "<strong>x</strong>" in body_to_html("**x**", as_markdown=True)
+    assert "<strong>" not in body_to_html("**x**")
+
+
 def test_body_to_html_escapes_and_keeps_breaks():
     html = body_to_html("Ada & Grace\nsecond line\n\nnew paragraph")
 
