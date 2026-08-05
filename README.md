@@ -5,7 +5,9 @@ recipient. Drafts are created, never sent, so every message can be reviewed in
 Gmail before it goes out. Any batch can be deleted from the app if the drafts are
 not right.
 
-Built for Apollo exports, but any CSV with an email column works.
+Built for Apollo exports, but any CSV with an email column works. Contacts you have
+not unlocked in Apollo are dropped rather than drafted, along with duplicates and
+rows with no usable address. Every dropped row is reported with a reason.
 
 ## What it does
 

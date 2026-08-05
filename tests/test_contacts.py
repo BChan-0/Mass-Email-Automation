@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from app.contacts import is_valid_email, parse_csv
 
 
@@ -111,3 +113,31 @@ def test_email_validation_rejects_placeholders():
     assert not is_valid_email("ada@engines")
     assert not is_valid_email("")
     assert not is_valid_email("a@b.example, c@d.example")
+
+
+@pytest.mark.parametrize(
+    "sentinel",
+    [
+        "email_not_unlocked@domain.com",
+        "EMAIL_NOT_UNLOCKED@Domain.com",
+        "not_unlocked@domain.com",
+        "email_not_found@domain.com",
+    ],
+)
+def test_gated_apollo_addresses_are_rejected(sentinel):
+    # Apollo writes a syntactically valid sentinel for contacts you have not
+    # unlocked, so a pattern check alone would draft to a junk domain.
+    assert not is_valid_email(sentinel)
+
+
+def test_a_gated_row_is_skipped_in_the_real_export_format():
+    csv_text = (
+        "First Name,Last Name,Title,Company,Email,Email Status\n"
+        "Ada,Lovelace,VP,Engines,ada@engines.example,Verified\n"
+        "Locked,Contact,Growth Lead,Hidden Co,email_not_unlocked@domain.com,Unavailable\n"
+    )
+    result = parse_csv(csv_text, max_contacts=10)
+
+    assert [contact.email for contact in result.contacts] == ["ada@engines.example"]
+    assert len(result.skipped) == 1
+    assert "unusable" in result.skipped[0].reason

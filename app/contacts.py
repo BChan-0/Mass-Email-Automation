@@ -33,6 +33,12 @@ EMAIL_PATTERN = re.compile(r"^[^@\s,;<>]+@[^@\s,;<>]+\.[A-Za-z]{2,}$")
 # Apollo writes these into the email column when an address is gated or bounced.
 PLACEHOLDER_EMAILS = frozenset({"email_not_unlocked", "not_unlocked", "n/a", "na", "none", "-", "unknown"})
 
+# Apollo also writes syntactically valid sentinels for gated contacts, such as
+# "email_not_unlocked@domain.com". Those pass a pattern check, so the local part and
+# the domain are matched separately to keep them out of a batch.
+PLACEHOLDER_LOCAL_PARTS = ("email_not_unlocked", "not_unlocked", "email_not_found", "no_email")
+PLACEHOLDER_DOMAINS = frozenset({"domain.com", "notunlocked.com"})
+
 
 @dataclass
 class Contact:
@@ -122,11 +128,24 @@ def _split_full_name(value: str) -> tuple[str, str]:
 
 
 def is_valid_email(value: str) -> bool:
-    """Check an address well enough to skip empty and placeholder cells."""
+    """Check an address well enough to skip empty and placeholder cells.
+
+    Apollo marks a gated contact with a sentinel that looks like a real address,
+    so pattern matching alone would let it through and draft to a junk domain.
+
+    :param value: raw cell contents from the email column
+    :returns: True when the value is worth handing to Gmail
+    """
     candidate = (value or "").strip().strip("<>").lower()
     if not candidate or candidate in PLACEHOLDER_EMAILS:
         return False
-    return bool(EMAIL_PATTERN.match(candidate))
+    if not EMAIL_PATTERN.match(candidate):
+        return False
+
+    local_part, _, domain = candidate.partition("@")
+    if domain in PLACEHOLDER_DOMAINS:
+        return False
+    return not any(local_part.startswith(marker) for marker in PLACEHOLDER_LOCAL_PARTS)
 
 
 def parse_csv(text: str, max_contacts: int) -> ParseResult:
