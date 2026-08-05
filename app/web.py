@@ -34,6 +34,7 @@ from .history import (
     ContactGuard,
     SentMailChecker,
     build_history_index,
+    fetch_live_draft_ids,
     load_suppression_list,
     normalize_address,
 )
@@ -95,13 +96,15 @@ def create_app(paths: Paths | None = None) -> Flask:
     def build_guard(service, *, skip_previously_emailed: bool = True) -> ContactGuard:
         """Assemble the prior contact check for one run.
 
-        The suppression list and this app's own history always apply. Searching
-        Gmail sent mail is the part the user can turn off, since it costs one API
+        The suppression list always applies. Earlier drafts count only while they are
+        still in the mailbox, which is confirmed against Gmail's own draft list.
+        Searching sent mail is the part the user can turn off, since it costs one API
         call per contact.
         """
         checker = SentMailChecker(service, enabled=bool(skip_previously_emailed))
+        live_ids, _reason = fetch_live_draft_ids(service)
         return ContactGuard(
-            history=build_history_index(store.list_batches()),
+            history=build_history_index(store.list_batches(), live_draft_ids=live_ids),
             suppression=load_suppression_list(resolved.suppression_file),
             sent_checker=checker,
         )
@@ -482,12 +485,12 @@ def create_app(paths: Paths | None = None) -> Flask:
         if parsed is None:
             return jsonify({"ok": False, "error": "Upload a CSV first."}), 400
 
+        # A connection is needed either way: listing drafts confirms which earlier
+        # drafts are still live, and that needs only the compose scope.
         check_sent = bool(payload.get("skip_previously_emailed", True))
-        service = None
-        if check_sent:
-            service, error_response = service_or_error()
-            if service is None:
-                return error_response
+        service, error_response = service_or_error()
+        if service is None:
+            return error_response
 
         guard = build_guard(service, skip_previously_emailed=check_sent)
         blocked = []

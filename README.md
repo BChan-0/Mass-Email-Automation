@@ -272,22 +272,28 @@ so rather than quietly sending literal asterisks.
 
 ## Never emailing the same person twice
 
-Before a draft is created, each address is checked against three sources. A match
-means no draft is created for that address, and the run reports it with the date of
-first contact.
+An address is held back when a message has actually reached the person, or when a
+draft to them is still waiting in the mailbox. Deleting a draft clears the block,
+since nothing was sent and there is no longer a pending message to duplicate.
 
-| Source | What it catches |
-|---|---|
-| Gmail sent mail | Anything sent from this account, including by hand or from a phone |
-| This app's history | Every address drafted in an earlier batch, including deleted drafts |
-| Do not contact list | Addresses you added by hand |
+| Source | What it catches | Cleared by |
+|---|---|---|
+| Gmail sent mail | Anything sent from this account, including by hand or from a phone | Nothing, a sent message stays sent |
+| Live drafts | Addresses with a draft from an earlier batch still in the mailbox | Deleting the draft |
+| Do not contact list | Addresses you added by hand | Removing the line from the file |
+
+Whether an earlier draft is still live is confirmed against Gmail's own draft list,
+not the local record. So a draft you deleted directly in Gmail stops blocking, and
+one you sent from Gmail keeps blocking because it now appears in sent mail. Listing
+drafts needs only the compose scope, so this works even with the sent mail search
+turned off.
 
 Click `Check who was emailed before` to see the report without creating anything.
 The same report appears after `Create drafts`, listing each held back address, why,
 when it was first emailed, and how many messages exist.
 
-A deleted draft still counts as prior contact, because deleting a draft here does
-not prove the message was never sent.
+This makes a batch safe to redo. If the drafts came out wrong, delete them and run
+the same list again with a better template.
 
 The sent mail search costs one Gmail lookup per contact, so a list of several
 hundred takes a while. Untick "Never draft to anyone this account has emailed
@@ -312,9 +318,13 @@ grace@compilers.example
 Each run writes a batch record under `data/batches/` holding the draft ids it
 created. Deleting a batch deletes only those ids, so drafts you wrote yourself are
 never touched. Deleted drafts stay in the record, struck through, as a history of
-the run.
+the run, and no longer hold their address back.
 
 `Remove record` forgets a batch in this app without deleting anything in Gmail.
+Because the record is what links a draft id to an address, forgetting it also
+forgets that those addresses have a draft waiting, so a later run can draft to them
+again and leave two drafts for the same person. Delete the drafts first, or leave
+the record in place. Anyone already in your sent mail stays blocked either way.
 
 ## Limits
 

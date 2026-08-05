@@ -23,6 +23,7 @@ from .history import (
     ContactGuard,
     SentMailChecker,
     build_history_index,
+    fetch_live_draft_ids,
     load_suppression_list,
     normalize_address,
 )
@@ -75,8 +76,9 @@ def _guard(service, store: BatchStore, paths: Paths, *, check_sent: bool) -> Con
     :param check_sent: whether to search Gmail sent mail
     :returns: a guard that blocks anyone contacted before
     """
+    live_ids, _reason = fetch_live_draft_ids(service)
     return ContactGuard(
-        history=build_history_index(store.list_batches()),
+        history=build_history_index(store.list_batches(), live_draft_ids=live_ids),
         suppression=load_suppression_list(paths.suppression_file),
         sent_checker=SentMailChecker(service, enabled=check_sent),
     )
@@ -159,7 +161,9 @@ def command_history(arguments, paths: Paths) -> int:
 
     store = BatchStore(paths.batches)
     check_sent = not arguments.no_sent_check
-    service = _service(paths) if check_sent else None
+    # A connection is used either way, since listing drafts is what tells us whether
+    # an earlier draft is still waiting. That needs only the compose scope.
+    service = _service(paths)
     guard = _guard(service, store, paths, check_sent=check_sent)
 
     blocked = [prior for prior in (guard.check(contact.email) for contact in parsed.contacts) if prior is not None]

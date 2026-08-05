@@ -781,7 +781,14 @@ function renderBatch(batch) {
   forget.textContent = "Remove record";
   forget.title = "Forget this batch here. Drafts still in Gmail are left alone.";
   forget.addEventListener("click", async () => {
-    if (live.length && !confirm(`This batch still has ${live.length} live draft(s) in Gmail. Remove the record anyway?`)) {
+    // The record is what remembers which addresses have a draft waiting, so
+    // forgetting it while drafts are live can produce a duplicate later.
+    const warning = live.length
+      ? `This batch still has ${live.length} live draft(s) in Gmail. Removing the record also forgets ` +
+        "that those people have a draft waiting, so a later run could draft to them again. " +
+        "Delete the drafts instead if you want them gone. Remove the record anyway?"
+      : "Remove this batch record?";
+    if (!confirm(warning)) {
       return;
     }
     try {

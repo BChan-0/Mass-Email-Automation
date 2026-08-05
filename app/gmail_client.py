@@ -147,6 +147,31 @@ class GmailDraftService:
             subject=subject,
         )
 
+    def list_draft_ids(self) -> set[str]:
+        """Return the ids of every draft currently in the mailbox.
+
+        One paginated listing rather than a lookup per recorded draft, so checking
+        whether earlier drafts are still live costs a couple of calls instead of one
+        per contact.
+
+        :returns: draft ids that exist right now
+        """
+        identifiers: set[str] = set()
+        page_token = None
+        while True:
+            response = _with_retry(
+                lambda token=page_token: (
+                    self._service.users().drafts().list(userId="me", maxResults=500, pageToken=token)
+                ),
+                "could not list drafts",
+            )
+            for draft in response.get("drafts") or []:
+                if draft.get("id"):
+                    identifiers.add(draft["id"])
+            page_token = response.get("nextPageToken")
+            if not page_token:
+                return identifiers
+
     def search_sent(self, query: str, *, limit: int = 20) -> list[dict]:
         """Search the mailbox and return message headers for the matches.
 

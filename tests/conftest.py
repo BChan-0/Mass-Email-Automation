@@ -30,10 +30,17 @@ class FakeGmail:
     sent_to: dict[str, list[str]] = field(default_factory=dict)
     search_failures: set[str] = field(default_factory=set)
     searches: list[str] = field(default_factory=list)
+    list_drafts_fails: bool = False
     counter: int = 0
 
     def profile_email(self) -> str:
         return "tester@example.com"
+
+    def list_draft_ids(self) -> set[str]:
+        """Ids of drafts that still exist, mirroring what Gmail would report."""
+        if self.list_drafts_fails:
+            raise GmailError("could not list drafts: stubbed failure")
+        return set(self.drafts)
 
     def search_sent(self, query: str, *, limit: int = 20) -> list[dict]:
         """Return metadata format messages for any address named in the query."""

@@ -12,6 +12,7 @@ from app.history import (
     HistoryIndex,
     SentMailChecker,
     build_history_index,
+    fetch_live_draft_ids,
     load_suppression_list,
     normalize_address,
 )
@@ -49,11 +50,12 @@ def test_history_index_returns_none_for_a_new_address():
     assert HistoryIndex().lookup("new@example.org") is None
 
 
-def test_index_is_built_from_every_batch_including_deleted_drafts(store):
+def test_a_deleted_draft_no_longer_blocks_the_address(store):
+    # Deleting a draft means nothing was sent and nothing is pending, so the
+    # address is free again.
     batch = store.new_batch(source_name="a.csv", subject_template="s", attachment_names=[])
     batch.created_at = "2026-03-01T00:00:00+00:00"
     batch.drafts.append(DraftRecord("d1", "m1", "ada@engines.example", "s"))
-    # A deleted draft may still have been sent by hand, so it counts.
     deleted = DraftRecord("d2", "m2", "grace@compilers.example", "s")
     deleted.deleted_at = "2026-03-02T00:00:00+00:00"
     batch.drafts.append(deleted)
@@ -62,7 +64,47 @@ def test_index_is_built_from_every_batch_including_deleted_drafts(store):
     index = build_history_index(store.list_batches())
 
     assert index.lookup("ada@engines.example") is not None
-    assert index.lookup("grace@compilers.example") is not None
+    assert index.lookup("grace@compilers.example") is None
+
+
+def test_a_draft_missing_from_gmail_no_longer_blocks_the_address(store):
+    # Deleted or sent straight from Gmail, the local record still says live, so
+    # Gmail's own draft list decides.
+    batch = store.new_batch(source_name="a.csv", subject_template="s", attachment_names=[])
+    batch.drafts.append(DraftRecord("d1", "m1", "ada@engines.example", "s"))
+    batch.drafts.append(DraftRecord("d2", "m2", "grace@compilers.example", "s"))
+    store.save(batch)
+
+    index = build_history_index(store.list_batches(), live_draft_ids={"d1"})
+
+    assert index.lookup("ada@engines.example") is not None
+    assert index.lookup("grace@compilers.example") is None
+
+
+def test_without_gmail_ids_the_local_record_is_trusted(store):
+    batch = store.new_batch(source_name="a.csv", subject_template="s", attachment_names=[])
+    batch.drafts.append(DraftRecord("d1", "m1", "ada@engines.example", "s"))
+    store.save(batch)
+
+    index = build_history_index(store.list_batches(), live_draft_ids=None)
+
+    assert index.lookup("ada@engines.example") is not None
+
+
+def test_fetching_live_draft_ids_reports_a_failure(gmail):
+    gmail.list_drafts_fails = True
+
+    identifiers, reason = fetch_live_draft_ids(gmail)
+
+    assert identifiers is None
+    assert "could not list drafts" in reason
+
+
+def test_fetching_live_draft_ids_without_a_service(gmail):
+    identifiers, reason = fetch_live_draft_ids(None)
+
+    assert identifiers is None
+    assert reason == "no Gmail connection"
 
 
 def test_the_run_in_progress_can_be_excluded(store):

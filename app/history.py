@@ -1,18 +1,26 @@
 """Prior contact checks that keep an address out of a new batch.
 
-Two independent sources answer "have I emailed this person before":
+An address is blocked when a message has actually reached the person, or when a
+draft to them is still sitting in the mailbox waiting to be sent. Deleting a draft
+undoes the block, because nothing was ever sent and there is no longer a pending
+message to duplicate.
+
+Three sources answer that:
 
 Gmail sent mail
     Searched per address with ``in:sent to:...``, so it catches mail sent by hand,
     from a phone, or by a different tool. Needs the read scope.
 
-This app's own history
-    Every draft this app has created, across all batches, including drafts that
-    were later deleted. A deleted draft may still have been sent by hand before
-    deletion, so it counts as prior contact.
+Live drafts from earlier batches
+    Drafts this app created that still exist in the mailbox. Membership is confirmed
+    against Gmail's own draft list rather than trusting the local record, so a draft
+    deleted or sent directly in Gmail is judged on what is actually there.
 
-A blocked address is never drafted. Each block carries the date of first contact
-so the report can say when it happened.
+Do not contact list
+    Addresses named by hand, which are blocked whatever the mailbox holds.
+
+A blocked address is never drafted. Each block carries the date of first contact so
+the report can say when it happened.
 """
 
 from __future__ import annotations
@@ -32,7 +40,7 @@ SOURCE_SUPPRESSION = "suppression_list"
 
 SOURCE_LABELS = {
     SOURCE_SENT_MAIL: "already emailed from this account",
-    SOURCE_PRIOR_BATCH: "drafted by this app before",
+    SOURCE_PRIOR_BATCH: "a draft to this address is still waiting in Gmail",
     SOURCE_SUPPRESSION: "on the do not contact list",
 }
 
@@ -82,11 +90,11 @@ class PriorContact:
 
 @dataclass
 class HistoryIndex:
-    """Prior contact drawn from this app's own batch records.
+    """Addresses with a draft from this app still waiting in the mailbox.
 
-    :param first_seen: address to earliest date this app drafted to it
+    :param first_seen: address to earliest date a live draft was created
     :param last_seen: address to most recent date
-    :param counts: address to how many drafts were created for it
+    :param counts: address to how many live drafts exist for it
     """
 
     first_seen: dict[str, str] = field(default_factory=dict)
@@ -94,7 +102,7 @@ class HistoryIndex:
     counts: dict[str, int] = field(default_factory=dict)
 
     def record(self, email: str, when: str) -> None:
-        """Note one prior draft to an address.
+        """Note one live draft to an address.
 
         Batch timestamps carry a time and zone, but the report only shows dates, so
         they are trimmed here to match the dates sent mail lookups produce.
@@ -122,18 +130,23 @@ class HistoryIndex:
             first_contact=self.first_seen.get(key, ""),
             last_contact=self.last_seen.get(key, ""),
             message_count=self.counts[key],
-            detail="a previous batch from this app drafted to this address",
+            detail="an unsent draft to this address is still in the mailbox",
         )
 
 
-def build_history_index(batches, exclude_batch_id: str = "") -> HistoryIndex:
-    """Index every address this app has drafted to.
+def build_history_index(batches, exclude_batch_id: str = "", live_draft_ids: set[str] | None = None) -> HistoryIndex:
+    """Index addresses whose earlier drafts are still waiting in the mailbox.
 
-    Drafts deleted later are still counted, because deletion here does not prove
-    the message was never sent.
+    A draft deleted through this app is skipped, and so is one that no longer exists
+    in Gmail, whether it was deleted or sent there. Deleting a draft therefore clears
+    the block, because nothing was sent and no pending message remains.
+
+    When ``live_draft_ids`` is None the local record is trusted on its own, which is
+    the best available answer with no read access to the mailbox.
 
     :param batches: batch records to read
     :param exclude_batch_id: batch to leave out, normally the run in progress
+    :param live_draft_ids: draft ids that currently exist in Gmail
     :returns: an index keyed by normalized address
     """
     index = HistoryIndex()
@@ -141,6 +154,10 @@ def build_history_index(batches, exclude_batch_id: str = "") -> HistoryIndex:
         if exclude_batch_id and batch.batch_id == exclude_batch_id:
             continue
         for draft in batch.drafts:
+            if draft.deleted_at is not None:
+                continue
+            if live_draft_ids is not None and draft.draft_id not in live_draft_ids:
+                continue
             index.record(draft.to, batch.created_at)
     return index
 
@@ -273,6 +290,23 @@ class SentMailChecker:
             message_count=len(dates),
             detail="found in this account's sent mail",
         )
+
+
+def fetch_live_draft_ids(service) -> tuple[set[str] | None, str]:
+    """Ask Gmail which drafts still exist.
+
+    Listing drafts needs only the compose scope, so this works even when the sent
+    mail search is turned off.
+
+    :param service: authorized Gmail service, or None
+    :returns: the ids and an empty string, or None and the reason it failed
+    """
+    if service is None:
+        return None, "no Gmail connection"
+    try:
+        return service.list_draft_ids(), ""
+    except GmailError as error:
+        return None, str(error)
 
 
 class ContactGuard:

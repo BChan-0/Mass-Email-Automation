@@ -252,6 +252,36 @@ def test_a_second_run_of_the_same_list_blocks_everyone(gmail, store):
     assert second.batch.blocked[0]["source"] == SOURCE_PRIOR_BATCH
 
 
+def test_deleting_the_first_run_lets_the_same_list_run_again(gmail, store):
+    contacts = [Contact(email="ada@engines.example", first_name="Ada", company="Engines", title="VP")]
+    first = create_drafts(
+        service=gmail,
+        store=store,
+        contacts=contacts,
+        templates=make_templates(),
+        attachments=[],
+        source_name="run1.csv",
+        guard=ContactGuard(sent_checker=SentMailChecker(gmail)),
+    )
+    delete_drafts(service=gmail, store=store, batch=first.batch)
+
+    second = create_drafts(
+        service=gmail,
+        store=store,
+        contacts=contacts,
+        templates=make_templates(),
+        attachments=[],
+        source_name="run2.csv",
+        guard=ContactGuard(
+            history=build_history_index(store.list_batches(), live_draft_ids=gmail.list_draft_ids()),
+            sent_checker=SentMailChecker(gmail),
+        ),
+    )
+
+    assert second.created == 1
+    assert second.blocked == 0
+
+
 def test_the_report_groups_blocks_by_source(gmail, store):
     gmail.sent_to["grace@compilers.example"] = ["Tue, 3 Mar 2026 10:00:00 -0800"]
     index = HistoryIndex()

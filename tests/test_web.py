@@ -517,6 +517,93 @@ def test_running_the_same_csv_twice_blocks_the_second_run(client, connected, apo
     assert second["history_report"]["by_source"] == {"prior_batch": 3}
 
 
+def test_deleting_a_batch_frees_the_contacts_to_be_drafted_again(client, connected, apollo_csv):
+    csv_id = upload(client, apollo_csv).get_json()["csv_id"]
+    body = {"csv_id": csv_id, "subject_template": "Hi", "body_template": "Body"}
+
+    first = client.post("/api/create-drafts", json=body).get_json()
+    assert first["created"] == 3
+
+    # A second run is blocked while those drafts are still waiting.
+    blocked = client.post("/api/create-drafts", json=body).get_json()
+    assert blocked["created"] == 0
+    assert blocked["blocked"] == 3
+
+    # Deleting them means nothing was sent and nothing is pending.
+    client.post(f"/api/batches/{first['batch_id']}/delete-drafts", json={})
+
+    again = client.post("/api/create-drafts", json=body).get_json()
+    assert again["created"] == 3
+    assert again["blocked"] == 0
+
+
+def test_deleting_one_draft_frees_only_that_contact(client, connected, apollo_csv):
+    csv_id = upload(client, apollo_csv).get_json()["csv_id"]
+    body = {"csv_id": csv_id, "subject_template": "Hi", "body_template": "Body"}
+    first = client.post("/api/create-drafts", json=body).get_json()
+    drafts = client.get(f"/api/batches/{first['batch_id']}").get_json()["batch"]["drafts"]
+    freed = drafts[0]
+
+    client.post(
+        f"/api/batches/{first['batch_id']}/delete-drafts",
+        json={"draft_ids": [freed["draft_id"]]},
+    )
+
+    again = client.post("/api/create-drafts", json=body).get_json()
+
+    assert again["created"] == 1
+    assert again["blocked"] == 2
+    assert freed["to"] in [draft["to"] for draft in connected.drafts.values()]
+
+
+def test_a_draft_deleted_directly_in_gmail_stops_blocking(client, connected, apollo_csv):
+    csv_id = upload(client, apollo_csv).get_json()["csv_id"]
+    body = {"csv_id": csv_id, "subject_template": "Hi", "body_template": "Body"}
+    client.post("/api/create-drafts", json=body)
+
+    # Delete outside this app, so the local record still calls it live.
+    gone = next(iter(connected.drafts))
+    freed_address = connected.drafts[gone]["to"]
+    del connected.drafts[gone]
+
+    again = client.post("/api/create-drafts", json=body).get_json()
+
+    assert again["created"] == 1
+    assert freed_address in [draft["to"] for draft in connected.drafts.values()]
+
+
+def test_forgetting_a_record_also_forgets_that_a_draft_is_waiting(client, connected, apollo_csv):
+    # The record links a draft id to an address, so removing it loses the block even
+    # though the draft is still in Gmail. The UI warns about this before doing it.
+    csv_id = upload(client, apollo_csv).get_json()["csv_id"]
+    body = {"csv_id": csv_id, "subject_template": "Hi", "body_template": "Body"}
+    first = client.post("/api/create-drafts", json=body).get_json()
+
+    client.post(f"/api/batches/{first['batch_id']}/forget", json={})
+    again = client.post("/api/create-drafts", json=body).get_json()
+
+    assert again["created"] == 3
+    assert len(connected.drafts) == 6
+
+
+def test_a_sent_draft_still_blocks_through_sent_mail(client, connected, apollo_csv):
+    csv_id = upload(client, apollo_csv).get_json()["csv_id"]
+    body = {"csv_id": csv_id, "subject_template": "Hi", "body_template": "Body"}
+    client.post("/api/create-drafts", json=body)
+
+    # Sending a draft removes it from the draft list but puts it in sent mail.
+    sent_id = next(iter(connected.drafts))
+    sent_address = connected.drafts[sent_id]["to"]
+    del connected.drafts[sent_id]
+    connected.sent_to[sent_address] = ["Tue, 3 Mar 2026 10:00:00 -0800"]
+
+    again = client.post("/api/create-drafts", json=body).get_json()
+    still_blocked = [entry["email"] for entry in again["history_report"]["blocked"]]
+
+    assert sent_address in still_blocked
+    assert again["created"] == 0
+
+
 def test_batches_endpoint_lists_saved_runs(client, connected, apollo_csv):
     csv_id = upload(client, apollo_csv).get_json()["csv_id"]
     client.post("/api/create-drafts", json={"csv_id": csv_id, "subject_template": "Hi", "body_template": "B"})
