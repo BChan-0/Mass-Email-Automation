@@ -54,6 +54,7 @@ function templatePayload() {
     bcc: el("bcc").value,
     send_as_html: el("send-as-html").checked,
     skip_incomplete: el("skip-incomplete").checked,
+    skip_previously_emailed: el("skip-previously-emailed").checked,
   };
 }
 
@@ -291,10 +292,152 @@ async function runPreview() {
   }
 }
 
+// Prior contact
+
+// Renders the blocked list shared by the pre-check and the post-create report.
+function renderBlockedList(container, blocked) {
+  const table = document.createElement("table");
+  table.style.width = "100%";
+  table.style.borderCollapse = "collapse";
+  table.style.marginTop = "8px";
+  table.style.fontSize = "13px";
+
+  const head = table.createTHead().insertRow();
+  ["Address", "Why", "First emailed", "Messages"].forEach((title) => {
+    const cell = document.createElement("th");
+    cell.textContent = title;
+    cell.style.textAlign = "left";
+    cell.style.padding = "4px 8px 4px 0";
+    head.appendChild(cell);
+  });
+
+  const body = table.createTBody();
+  blocked.forEach((entry) => {
+    const row = body.insertRow();
+    [
+      entry.email,
+      entry.detail || entry.label,
+      entry.first_contact || "not recorded",
+      entry.message_count ? String(entry.message_count) : "",
+    ].forEach((value) => {
+      const cell = row.insertCell();
+      cell.textContent = value;
+      cell.style.padding = "4px 8px 4px 0";
+      cell.style.borderTop = "1px solid var(--border)";
+    });
+  });
+  container.appendChild(table);
+}
+
+function renderHistoryReport(container, report, headline) {
+  container.textContent = "";
+
+  const summary = document.createElement("div");
+  summary.className = report.blocked_count ? "warn" : "ok";
+  summary.textContent = headline;
+  container.appendChild(summary);
+
+  if (!report.checked_sent_mail) {
+    const note = document.createElement("div");
+    note.className = "hint";
+    note.textContent =
+      "Your sent mail was not searched, so someone you emailed outside this app could still be included.";
+    container.appendChild(note);
+  }
+
+  if (report.sent_check_errors?.length) {
+    const note = document.createElement("div");
+    note.className = "error";
+    note.textContent =
+      `${report.sent_check_errors.length} sent mail lookup(s) failed, so those contacts were not verified: ` +
+      report.sent_check_errors[0].error;
+    container.appendChild(note);
+  }
+
+  if (report.blocked?.length) {
+    renderBlockedList(container, report.blocked);
+  }
+  container.classList.remove("hidden");
+}
+
+async function checkHistory() {
+  if (!state.csvId) {
+    toast("Upload a CSV first", true);
+    return;
+  }
+  const area = el("history-area");
+  area.textContent = "Checking sent mail, this can take a moment for long lists";
+  area.classList.remove("hidden");
+  try {
+    const result = await postJson("/api/check-history", templatePayload());
+    const headline = result.blocked_count
+      ? `${result.blocked_count} of ${result.total} contacts were emailed before and will be skipped. ` +
+        `${result.would_draft} would be drafted.`
+      : `None of the ${result.total} contacts have been emailed before.`;
+    renderHistoryReport(area, result, headline);
+    if (result.slow_warning) {
+      toast("Long list: the sent mail check adds one lookup per contact", false);
+    }
+  } catch (error) {
+    area.textContent = "";
+    const message = document.createElement("div");
+    message.className = "error";
+    message.textContent = error.message;
+    area.appendChild(message);
+  }
+}
+
+// Do not contact list
+
+async function loadSuppression() {
+  try {
+    const result = await api("/api/suppression");
+    const list = el("suppression-list");
+    list.textContent = "";
+    el("suppression-summary").textContent = result.count
+      ? `${result.count} address(es) blocked`
+      : "No addresses listed";
+
+    result.entries.forEach((entry) => {
+      const row = document.createElement("li");
+      const label = document.createElement("span");
+      label.textContent = entry.note ? `${entry.email} (${entry.note})` : entry.email;
+      row.appendChild(label);
+      list.appendChild(row);
+    });
+  } catch (error) {
+    el("suppression-summary").textContent = error.message;
+  }
+}
+
+async function addSuppression() {
+  const value = el("suppression-input").value.trim();
+  if (!value) {
+    toast("Enter an address first", true);
+    return;
+  }
+  try {
+    const result = await postJson("/api/suppression", {
+      emails: value.split(/[\s,;]+/).filter(Boolean),
+      note: el("suppression-note").value.trim(),
+    });
+    el("suppression-input").value = "";
+    el("suppression-note").value = "";
+    toast(result.added ? `${result.added} address(es) added` : "Already on the list");
+    await loadSuppression();
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
 // Create
 
 async function createDrafts() {
-  if (!confirm(`Create ${state.contactCount} Gmail drafts? Nothing is sent.`)) {
+  const guarded = el("skip-previously-emailed").checked;
+  const caveat = guarded
+    ? " Anyone already emailed from this account is skipped, so the final count may be lower."
+    : "";
+  if (!confirm(`Create up to ${state.contactCount} Gmail drafts? Nothing is sent.${caveat}`)) {
     return;
   }
   const button = el("create");
@@ -304,10 +447,18 @@ async function createDrafts() {
   try {
     const result = await postJson("/api/create-drafts", templatePayload());
     const parts = [`${result.created} draft(s) created`];
-    if (result.skipped) parts.push(`${result.skipped} skipped`);
+    if (result.blocked) parts.push(`${result.blocked} skipped as already emailed`);
+    if (result.skipped) parts.push(`${result.skipped} skipped for missing fields`);
     if (result.failed) parts.push(`${result.failed} failed`);
     status.textContent = parts.join(", ") + ".";
     status.className = result.failed ? "warn" : "ok";
+
+    if (result.history_report) {
+      const headline = result.blocked
+        ? `${result.blocked} contact(s) were held back because they had been emailed before.`
+        : "No contacts had been emailed before.";
+      renderHistoryReport(el("history-area"), result.history_report, headline);
+    }
     if (result.stopped_early) {
       toast("Stopped early after repeated failures. Check the connection and try again.", true);
     } else {
@@ -536,11 +687,17 @@ function wire() {
   });
 
   el("preview").addEventListener("click", runPreview);
+  el("check-history").addEventListener("click", checkHistory);
   el("create").addEventListener("click", createDrafts);
   el("refresh-batches").addEventListener("click", loadBatches);
+  el("suppression-add").addEventListener("click", addSuppression);
+  el("suppression-input").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") addSuppression();
+  });
 }
 
 wire();
 renderChips(defaultFields());
 refreshStatus();
 loadBatches();
+loadSuppression();

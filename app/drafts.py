@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 from .contacts import Contact
 from .gmail_client import GmailDraftService, GmailError
+from .history import ContactGuard
 from .message import Attachment, build_message
 from .store import Batch, BatchStore, DraftRecord
 from .templating import build_context, find_placeholders, render
@@ -80,7 +81,27 @@ class CreateOutcome:
     created: int = 0
     failed: int = 0
     skipped: int = 0
+    blocked: int = 0
     stopped_early: bool = False
+    checked_sent_mail: bool = False
+    sent_check_errors: list[dict[str, str]] = field(default_factory=list)
+
+    @property
+    def history_report(self) -> dict[str, object]:
+        """Summary of addresses held back because they were contacted before."""
+        blocked = self.batch.blocked
+        by_source: dict[str, int] = {}
+        for entry in blocked:
+            source = str(entry.get("source", "unknown"))
+            by_source[source] = by_source.get(source, 0) + 1
+        return {
+            "blocked": blocked,
+            "blocked_count": len(blocked),
+            "by_source": by_source,
+            "checked_sent_mail": self.checked_sent_mail,
+            "sent_check_errors": self.sent_check_errors,
+            "coverage_complete": self.checked_sent_mail and not self.sent_check_errors,
+        }
 
 
 def create_drafts(
@@ -92,6 +113,7 @@ def create_drafts(
     attachments: list[Attachment],
     source_name: str,
     skip_incomplete: bool = True,
+    guard: ContactGuard | None = None,
     save_every: int = 10,
 ) -> CreateOutcome:
     """Render each contact and create a Gmail draft for it.
@@ -107,6 +129,7 @@ def create_drafts(
     :param source_name: label for the batch, usually the CSV filename
     :param skip_incomplete: skip rows with unresolved placeholders instead of
         creating a draft containing raw template syntax
+    :param guard: prior contact check; a blocked address is never drafted
     :param save_every: how many drafts to create between saves
     :returns: the batch record and per row counts
     """
@@ -119,6 +142,15 @@ def create_drafts(
     store.save(batch)
 
     for index, rendered in enumerate(render_all(contacts, templates), start=1):
+        # Prior contact is checked before anything is built, so a blocked address
+        # never reaches Gmail even if the template or attachments are wrong.
+        if guard is not None:
+            prior = guard.check(rendered.contact.email)
+            if prior is not None:
+                batch.blocked.append(prior.to_dict())
+                outcome.blocked += 1
+                continue
+
         if skip_incomplete and not rendered.ok:
             batch.skipped.append(
                 {
@@ -169,6 +201,10 @@ def create_drafts(
 
         if index % save_every == 0:
             store.save(batch)
+
+    if guard is not None:
+        outcome.checked_sent_mail = guard.checked_sent_mail
+        outcome.sent_check_errors = list(guard.sent_errors)
 
     store.save(batch)
     return outcome

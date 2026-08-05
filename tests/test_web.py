@@ -265,6 +265,116 @@ def test_forget_removes_the_record_but_not_the_drafts(client, connected, apollo_
     assert len(connected.drafts) == 3
 
 
+def test_create_drafts_blocks_a_previously_emailed_contact(client, connected, apollo_csv):
+    connected.sent_to["grace@compilers.example"] = ["Tue, 3 Mar 2026 10:00:00 -0800"]
+    csv_id = upload(client, apollo_csv).get_json()["csv_id"]
+
+    payload = client.post(
+        "/api/create-drafts",
+        json={"csv_id": csv_id, "subject_template": "Hi", "body_template": "Body"},
+    ).get_json()
+
+    assert payload["created"] == 2
+    assert payload["blocked"] == 1
+    report = payload["history_report"]
+    assert report["blocked"][0]["email"] == "grace@compilers.example"
+    assert report["blocked"][0]["first_contact"] == "2026-03-03"
+    assert report["coverage_complete"] is True
+
+
+def test_the_sent_mail_check_can_be_turned_off(client, connected, apollo_csv):
+    connected.sent_to["grace@compilers.example"] = ["Tue, 3 Mar 2026 10:00:00 -0800"]
+    csv_id = upload(client, apollo_csv).get_json()["csv_id"]
+
+    payload = client.post(
+        "/api/create-drafts",
+        json={
+            "csv_id": csv_id,
+            "subject_template": "Hi",
+            "body_template": "Body",
+            "skip_previously_emailed": False,
+        },
+    ).get_json()
+
+    assert payload["created"] == 3
+    assert payload["blocked"] == 0
+    assert payload["history_report"]["checked_sent_mail"] is False
+
+
+def test_check_history_reports_without_creating_anything(client, connected, apollo_csv):
+    connected.sent_to["grace@compilers.example"] = ["Tue, 3 Mar 2026 10:00:00 -0800"]
+    csv_id = upload(client, apollo_csv).get_json()["csv_id"]
+
+    payload = client.post("/api/check-history", json={"csv_id": csv_id}).get_json()
+
+    assert payload["total"] == 3
+    assert payload["blocked_count"] == 1
+    assert payload["would_draft"] == 2
+    assert connected.drafts == {}
+
+
+def test_check_history_needs_a_csv(client, connected):
+    assert client.post("/api/check-history", json={}).status_code == 400
+
+
+def test_check_history_needs_a_connection_when_searching_sent_mail(client, apollo_csv):
+    csv_id = upload(client, apollo_csv).get_json()["csv_id"]
+
+    response = client.post("/api/check-history", json={"csv_id": csv_id})
+
+    assert response.status_code == 401
+
+
+def test_suppression_list_round_trip(client, connected, apollo_csv):
+    added = client.post(
+        "/api/suppression",
+        json={"emails": ["Grace@Compilers.Example"], "note": "asked to be removed"},
+    ).get_json()
+
+    assert added["added"] == 1
+    listed = client.get("/api/suppression").get_json()
+    assert listed["entries"][0]["email"] == "grace@compilers.example"
+    assert listed["entries"][0]["note"] == "asked to be removed"
+
+
+def test_a_suppressed_address_is_not_drafted(client, connected, apollo_csv):
+    client.post("/api/suppression", json={"emails": ["grace@compilers.example"]})
+    csv_id = upload(client, apollo_csv).get_json()["csv_id"]
+
+    payload = client.post(
+        "/api/create-drafts",
+        json={"csv_id": csv_id, "subject_template": "Hi", "body_template": "Body"},
+    ).get_json()
+
+    assert payload["created"] == 2
+    assert payload["history_report"]["by_source"] == {"suppression_list": 1}
+
+
+def test_adding_the_same_address_twice_does_not_duplicate_it(client, connected):
+    client.post("/api/suppression", json={"emails": ["ada@engines.example"]})
+    second = client.post("/api/suppression", json={"emails": ["Ada@Engines.Example"]}).get_json()
+
+    assert second["added"] == 0
+    assert client.get("/api/suppression").get_json()["count"] == 1
+
+
+def test_suppression_rejects_an_empty_request(client):
+    assert client.post("/api/suppression", json={}).status_code == 400
+
+
+def test_running_the_same_csv_twice_blocks_the_second_run(client, connected, apollo_csv):
+    csv_id = upload(client, apollo_csv).get_json()["csv_id"]
+    body = {"csv_id": csv_id, "subject_template": "Hi", "body_template": "Body"}
+
+    first = client.post("/api/create-drafts", json=body).get_json()
+    second = client.post("/api/create-drafts", json=body).get_json()
+
+    assert first["created"] == 3
+    assert second["created"] == 0
+    assert second["blocked"] == 3
+    assert second["history_report"]["by_source"] == {"prior_batch": 3}
+
+
 def test_batches_endpoint_lists_saved_runs(client, connected, apollo_csv):
     csv_id = upload(client, apollo_csv).get_json()["csv_id"]
     client.post("/api/create-drafts", json={"csv_id": csv_id, "subject_template": "Hi", "body_template": "B"})

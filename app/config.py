@@ -8,9 +8,20 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-# Least privilege scope that still allows creating, listing, and deleting drafts.
-# gmail.compose cannot read the inbox.
-GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.compose"]
+# gmail.compose creates, lists, and deletes drafts. gmail.readonly is needed to
+# search sent mail for prior contact; gmail.metadata would be narrower but cannot
+# use a search query, which would mean walking the whole mailbox instead.
+COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compose"
+READ_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
+GMAIL_SCOPES = [COMPOSE_SCOPE, READ_SCOPE]
+
+# Prior contact older than this is still reported. Kept as a constant so the
+# meaning of "ever emailed" stays in one place.
+SENT_SEARCH_QUERY = "in:sent to:{email}"
+
+# Sent mail lookups cost one API call per contact, so a large list takes a while.
+# Warn past this many contacts rather than silently stalling.
+HISTORY_SLOW_THRESHOLD = 250
 
 # Gmail rejects messages over 25 MB total, so keep attachments under that to leave
 # room for the body and MIME overhead. The CSV limit is unrelated to Gmail and only
@@ -44,6 +55,11 @@ class Paths:
     @property
     def settings_file(self) -> Path:
         return self.data / "settings.json"
+
+    @property
+    def suppression_file(self) -> Path:
+        """Addresses never to contact, one per line. Edited by hand."""
+        return self.data / "do-not-contact.txt"
 
     @property
     def client_secret_file(self) -> Path:

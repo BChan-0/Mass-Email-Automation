@@ -19,6 +19,13 @@ from .gmail_client import (
     load_credentials,
     run_local_authorization,
 )
+from .history import (
+    ContactGuard,
+    SentMailChecker,
+    build_history_index,
+    load_suppression_list,
+    normalize_address,
+)
 from .message import Attachment
 from .store import BatchStore, load_settings
 
@@ -56,6 +63,22 @@ def _service(paths: Paths) -> GmailDraftService:
     if credentials is None:
         raise SystemExit("Not connected to Gmail. Run: python -m app.cli auth")
     return GmailDraftService(credentials)
+
+
+def _guard(service, store: BatchStore, paths: Paths, *, check_sent: bool) -> ContactGuard:
+    """Assemble the prior contact check.
+
+    :param service: authorized service, or None when sent mail is not searched
+    :param store: batch records supplying this app's own history
+    :param paths: layout holding the do not contact list
+    :param check_sent: whether to search Gmail sent mail
+    :returns: a guard that blocks anyone contacted before
+    """
+    return ContactGuard(
+        history=build_history_index(store.list_batches()),
+        suppression=load_suppression_list(paths.suppression_file),
+        sent_checker=SentMailChecker(service, enabled=check_sent),
+    )
 
 
 def command_auth(arguments, paths: Paths) -> int:
@@ -98,21 +121,76 @@ def command_create(arguments, paths: Paths) -> int:
 
     attachments = [Attachment.from_path(Path(item)) for item in arguments.attach or []]
     store = BatchStore(paths.batches)
+    service = _service(paths)
     outcome = create_drafts(
-        service=_service(paths),
+        service=service,
         store=store,
         contacts=parsed.contacts,
         templates=_templates(arguments, paths),
         attachments=attachments,
         source_name=Path(arguments.csv).name,
         skip_incomplete=not arguments.allow_incomplete,
+        guard=_guard(service, store, paths, check_sent=not arguments.allow_previously_emailed),
     )
     print(
-        f"batch {outcome.batch.batch_id}: {outcome.created} created, {outcome.skipped} skipped, {outcome.failed} failed"
+        f"batch {outcome.batch.batch_id}: {outcome.created} created, "
+        f"{outcome.blocked} already contacted, {outcome.skipped} skipped, {outcome.failed} failed"
     )
+    for entry in outcome.batch.blocked:
+        when = entry.get("first_contact") or "date not recorded"
+        print(f"  held back {entry['email']}: {entry['label']}, first contact {when}")
+    if outcome.sent_check_errors:
+        print(
+            f"{len(outcome.sent_check_errors)} sent mail lookup(s) failed, so coverage is partial",
+            file=sys.stderr,
+        )
     for failure in outcome.batch.failures[:10]:
         print(f"  failed {failure['email']}: {failure['error']}", file=sys.stderr)
     return 0 if outcome.created and not outcome.stopped_early else 1
+
+
+def command_history(arguments, paths: Paths) -> int:
+    """Report who has been contacted before, without creating drafts."""
+    parsed = _read_csv(Path(arguments.csv))
+    if not parsed.contacts:
+        print("No usable contacts in that CSV.", file=sys.stderr)
+        return 1
+
+    store = BatchStore(paths.batches)
+    check_sent = not arguments.no_sent_check
+    service = _service(paths) if check_sent else None
+    guard = _guard(service, store, paths, check_sent=check_sent)
+
+    blocked = [prior for prior in (guard.check(contact.email) for contact in parsed.contacts) if prior is not None]
+
+    print(
+        f"{len(parsed.contacts)} contacts, {len(blocked)} contacted before, {len(parsed.contacts) - len(blocked)} new"
+    )
+    for entry in blocked:
+        when = entry.first_contact or "date not recorded"
+        print(f"  {entry.email}: {entry.label}, first contact {when}")
+    if not check_sent:
+        print("Sent mail was not searched, so this covers only local records.")
+    if guard.sent_errors:
+        print(f"{len(guard.sent_errors)} sent mail lookup(s) failed, so coverage is partial", file=sys.stderr)
+    return 0
+
+
+def command_block(arguments, paths: Paths) -> int:
+    """Add addresses to the do not contact list."""
+    existing = load_suppression_list(paths.suppression_file)
+    additions = [normalize_address(item) for item in arguments.email]
+    new_entries = [address for address in additions if address and address not in existing]
+
+    if new_entries:
+        paths.suppression_file.parent.mkdir(parents=True, exist_ok=True)
+        with paths.suppression_file.open("a", encoding="utf-8") as stream:
+            for address in new_entries:
+                stream.write(f"{address}, {arguments.note}\n" if arguments.note else f"{address}\n")
+
+    print(f"{len(new_entries)} added, {len(existing) + len(new_entries)} on the list")
+    print(f"List file: {paths.suppression_file}")
+    return 0
 
 
 def command_list(_arguments, paths: Paths) -> int:
@@ -189,7 +267,26 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="draft contacts with unresolved placeholders instead of skipping them",
     )
+    create.add_argument(
+        "--allow-previously-emailed",
+        action="store_true",
+        help="do not search sent mail; the do not contact list and local history still apply",
+    )
     create.set_defaults(handler=command_create)
+
+    history = subparsers.add_parser("history", help="report who has been contacted before")
+    history.add_argument("csv", help="path to the contact CSV")
+    history.add_argument(
+        "--no-sent-check",
+        action="store_true",
+        help="skip the sent mail search and use only local records",
+    )
+    history.set_defaults(handler=command_history)
+
+    block = subparsers.add_parser("block", help="add addresses to the do not contact list")
+    block.add_argument("email", nargs="+", help="addresses never to contact")
+    block.add_argument("--note", default="", help="reason, shown in reports")
+    block.set_defaults(handler=command_block)
 
     listing = subparsers.add_parser("batches", help="list recorded batches")
     listing.set_defaults(handler=command_list)

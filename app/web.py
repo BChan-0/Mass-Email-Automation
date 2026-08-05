@@ -13,6 +13,7 @@ from flask import Flask, jsonify, render_template, request, session
 from werkzeug.utils import secure_filename
 
 from .config import (
+    HISTORY_SLOW_THRESHOLD,
     MAX_ATTACHMENT_BYTES,
     MAX_CONTACTS,
     MAX_CSV_BYTES,
@@ -28,6 +29,13 @@ from .gmail_client import (
     GmailError,
     load_credentials,
     run_local_authorization,
+)
+from .history import (
+    ContactGuard,
+    SentMailChecker,
+    build_history_index,
+    load_suppression_list,
+    normalize_address,
 )
 from .message import Attachment
 from .store import BatchStore, load_settings, save_settings
@@ -78,6 +86,20 @@ def create_app(paths: Paths | None = None) -> Flask:
     csv_cache: dict[str, ParseResult] = {}
     csv_names: dict[str, str] = {}
     attachment_cache: dict[str, list[Attachment]] = {}
+
+    def build_guard(service, *, skip_previously_emailed: bool = True) -> ContactGuard:
+        """Assemble the prior contact check for one run.
+
+        The suppression list and this app's own history always apply. Searching
+        Gmail sent mail is the part the user can turn off, since it costs one API
+        call per contact.
+        """
+        checker = SentMailChecker(service, enabled=bool(skip_previously_emailed))
+        return ContactGuard(
+            history=build_history_index(store.list_batches()),
+            suppression=load_suppression_list(resolved.suppression_file),
+            sent_checker=checker,
+        )
 
     def service_or_error() -> tuple[GmailDraftService | None, tuple]:
         """Return an authorized service, or a JSON error response to send back."""
@@ -323,6 +345,7 @@ def create_app(paths: Paths | None = None) -> Flask:
             attachments=attachments,
             source_name=csv_names.get(csv_id, "contacts.csv"),
             skip_incomplete=bool(payload.get("skip_incomplete", True)),
+            guard=build_guard(service, skip_previously_emailed=payload.get("skip_previously_emailed", True)),
         )
 
         return jsonify(
@@ -332,11 +355,95 @@ def create_app(paths: Paths | None = None) -> Flask:
                 "created": outcome.created,
                 "failed": outcome.failed,
                 "skipped": outcome.skipped,
+                "blocked": outcome.blocked,
                 "stopped_early": outcome.stopped_early,
                 "failures": outcome.batch.failures,
                 "skipped_rows": outcome.batch.skipped,
+                "history_report": outcome.history_report,
             }
         )
+
+    @app.post("/api/check-history")
+    def check_history():
+        """Report which contacts would be held back, without creating anything.
+
+        Run this before Create drafts to see the prior contact report up front.
+        """
+        payload = request.get_json(silent=True) or {}
+        csv_id = str(payload.get("csv_id") or session.get("csv_id") or "")
+        parsed = csv_cache.get(csv_id)
+        if parsed is None:
+            return jsonify({"ok": False, "error": "Upload a CSV first."}), 400
+
+        check_sent = bool(payload.get("skip_previously_emailed", True))
+        service = None
+        if check_sent:
+            service, error_response = service_or_error()
+            if service is None:
+                return error_response
+
+        guard = build_guard(service, skip_previously_emailed=check_sent)
+        blocked = []
+        for contact in parsed.contacts:
+            prior = guard.check(contact.email)
+            if prior is not None:
+                blocked.append(prior.to_dict())
+
+        by_source: dict[str, int] = {}
+        for entry in blocked:
+            source = str(entry["source"])
+            by_source[source] = by_source.get(source, 0) + 1
+
+        return jsonify(
+            {
+                "ok": True,
+                "total": len(parsed.contacts),
+                "blocked_count": len(blocked),
+                "would_draft": len(parsed.contacts) - len(blocked),
+                "blocked": blocked,
+                "by_source": by_source,
+                "checked_sent_mail": guard.checked_sent_mail,
+                "sent_check_errors": guard.sent_errors,
+                "slow_warning": len(parsed.contacts) > HISTORY_SLOW_THRESHOLD and check_sent,
+            }
+        )
+
+    @app.get("/api/suppression")
+    def get_suppression():
+        """Return the do not contact list."""
+        entries = load_suppression_list(resolved.suppression_file)
+        return jsonify(
+            {
+                "ok": True,
+                "path": str(resolved.suppression_file),
+                "count": len(entries),
+                "entries": [{"email": email, "note": note} for email, note in sorted(entries.items())],
+            }
+        )
+
+    @app.post("/api/suppression")
+    def post_suppression():
+        """Add addresses to the do not contact list."""
+        payload = request.get_json(silent=True) or {}
+        raw = payload.get("emails")
+        candidates = raw if isinstance(raw, list) else str(payload.get("email", "")).split()
+        note = str(payload.get("note", "")).strip()
+
+        additions = [normalize_address(str(item)) for item in candidates]
+        additions = [address for address in additions if address]
+        if not additions:
+            return jsonify({"ok": False, "error": "No addresses given."}), 400
+
+        existing = load_suppression_list(resolved.suppression_file)
+        new_entries = [address for address in additions if address not in existing]
+
+        if new_entries:
+            resolved.suppression_file.parent.mkdir(parents=True, exist_ok=True)
+            with resolved.suppression_file.open("a", encoding="utf-8") as stream:
+                for address in new_entries:
+                    stream.write(f"{address}, {note}\n" if note else f"{address}\n")
+
+        return jsonify({"ok": True, "added": len(new_entries), "count": len(existing) + len(new_entries)})
 
     @app.get("/api/batches")
     def list_batches():

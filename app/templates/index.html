@@ -88,6 +88,17 @@
           <input id="skip-incomplete" type="checkbox" {% if settings.skip_incomplete %}checked{% endif %}>
           <span>Skip contacts with a missing field instead of drafting raw placeholders</span>
         </label>
+        <label class="check">
+          <input
+            id="skip-previously-emailed"
+            type="checkbox"
+            {% if settings.skip_previously_emailed %}checked{% endif %}
+          >
+          <span>
+            Never draft to anyone this account has emailed before. Searches your
+            sent mail, one lookup per contact, so a long list takes longer.
+          </span>
+        </label>
       </div>
     </details>
 
@@ -114,14 +125,31 @@
     <h2>4. Preview and create</h2>
     <div class="row">
       <button id="preview" type="button" class="btn btn-secondary">Preview first {{ preview_limit }}</button>
+      <button id="check-history" type="button" class="btn btn-secondary">Check who was emailed before</button>
       <button id="create" type="button" class="btn btn-primary" disabled>Create drafts</button>
       <span id="create-status" class="hint"></span>
     </div>
     <div id="preview-area" class="preview hidden"></div>
+    <div id="history-area" class="preview hidden"></div>
   </section>
 
   <section class="card">
-    <h2>5. Batches</h2>
+    <h2>5. Do not contact list</h2>
+    <p class="hint">
+      Addresses here are never drafted to, whatever the CSV says. Prior contact
+      found in your sent mail is blocked automatically and does not need listing.
+    </p>
+    <div class="row">
+      <input id="suppression-input" type="text" placeholder="name@example.com" style="max-width: 280px">
+      <input id="suppression-note" type="text" placeholder="reason (optional)" style="max-width: 220px">
+      <button id="suppression-add" type="button" class="btn btn-secondary btn-small">Add</button>
+      <span id="suppression-summary" class="hint"></span>
+    </div>
+    <ul id="suppression-list" class="list"></ul>
+  </section>
+
+  <section class="card">
+    <h2>6. Batches</h2>
     <p class="hint">
       Every run is recorded here. Delete removes only the drafts this app created,
       so drafts you wrote by hand are never touched.

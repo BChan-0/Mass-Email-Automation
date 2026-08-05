@@ -6,6 +6,15 @@ import email
 
 from app.contacts import Contact, parse_csv
 from app.drafts import TemplateSet, create_drafts, delete_drafts, render_one
+from app.history import (
+    SOURCE_PRIOR_BATCH,
+    SOURCE_SENT_MAIL,
+    SOURCE_SUPPRESSION,
+    ContactGuard,
+    HistoryIndex,
+    SentMailChecker,
+    build_history_index,
+)
 from app.message import Attachment
 
 
@@ -187,6 +196,135 @@ def test_repeated_failures_stop_the_run(gmail, store):
     assert outcome.stopped_early
     assert outcome.created == 0
     assert outcome.failed == 5
+
+
+def test_a_previously_emailed_contact_is_never_drafted(gmail, store):
+    gmail.sent_to["grace@compilers.example"] = ["Tue, 3 Mar 2026 10:00:00 -0800"]
+    contacts = [
+        Contact(email="ada@engines.example", first_name="Ada", company="Engines", title="VP"),
+        Contact(email="grace@compilers.example", first_name="Grace", company="Compilers", title="Chief"),
+    ]
+
+    outcome = create_drafts(
+        service=gmail,
+        store=store,
+        contacts=contacts,
+        templates=make_templates(),
+        attachments=[],
+        source_name="two.csv",
+        guard=ContactGuard(sent_checker=SentMailChecker(gmail)),
+    )
+
+    assert outcome.created == 1
+    assert outcome.blocked == 1
+    assert [draft.to for draft in outcome.batch.drafts] == ["ada@engines.example"]
+    blocked = outcome.batch.blocked[0]
+    assert blocked["email"] == "grace@compilers.example"
+    assert blocked["first_contact"] == "2026-03-03"
+    assert blocked["source"] == SOURCE_SENT_MAIL
+
+
+def test_a_second_run_of_the_same_list_blocks_everyone(gmail, store):
+    contacts = [Contact(email="ada@engines.example", first_name="Ada", company="Engines", title="VP")]
+    first = create_drafts(
+        service=gmail,
+        store=store,
+        contacts=contacts,
+        templates=make_templates(),
+        attachments=[],
+        source_name="run1.csv",
+        guard=ContactGuard(sent_checker=SentMailChecker(gmail)),
+    )
+    assert first.created == 1
+
+    second = create_drafts(
+        service=gmail,
+        store=store,
+        contacts=contacts,
+        templates=make_templates(),
+        attachments=[],
+        source_name="run2.csv",
+        guard=ContactGuard(history=build_history_index(store.list_batches())),
+    )
+
+    assert second.created == 0
+    assert second.blocked == 1
+    assert second.batch.blocked[0]["source"] == SOURCE_PRIOR_BATCH
+
+
+def test_the_report_groups_blocks_by_source(gmail, store):
+    gmail.sent_to["grace@compilers.example"] = ["Tue, 3 Mar 2026 10:00:00 -0800"]
+    index = HistoryIndex()
+    index.record("ada@engines.example", "2026-01-01T00:00:00+00:00")
+    contacts = [
+        Contact(email="ada@engines.example", first_name="Ada", company="Engines", title="VP"),
+        Contact(email="grace@compilers.example", first_name="Grace", company="Compilers", title="Chief"),
+        Contact(email="katherine@orbital.example", first_name="Katherine", company="Orbital", title="Dir"),
+        Contact(email="new@example.org", first_name="New", company="Fresh", title="Lead"),
+    ]
+
+    outcome = create_drafts(
+        service=gmail,
+        store=store,
+        contacts=contacts,
+        templates=make_templates(),
+        attachments=[],
+        source_name="mixed.csv",
+        guard=ContactGuard(
+            history=index,
+            suppression={"katherine@orbital.example": "asked to be removed"},
+            sent_checker=SentMailChecker(gmail),
+        ),
+    )
+    report = outcome.history_report
+
+    assert outcome.created == 1
+    assert report["blocked_count"] == 3
+    assert report["by_source"] == {
+        SOURCE_PRIOR_BATCH: 1,
+        SOURCE_SENT_MAIL: 1,
+        SOURCE_SUPPRESSION: 1,
+    }
+    assert report["coverage_complete"] is True
+
+
+def test_the_report_says_coverage_was_partial_after_a_lookup_failure(gmail, store):
+    gmail.search_failures.add("ada@engines.example")
+    contacts = [Contact(email="ada@engines.example", first_name="Ada", company="Engines", title="VP")]
+
+    outcome = create_drafts(
+        service=gmail,
+        store=store,
+        contacts=contacts,
+        templates=make_templates(),
+        attachments=[],
+        source_name="one.csv",
+        guard=ContactGuard(sent_checker=SentMailChecker(gmail)),
+    )
+
+    # The draft is still created; the report says the check could not confirm it.
+    assert outcome.created == 1
+    assert outcome.history_report["coverage_complete"] is False
+    assert len(outcome.history_report["sent_check_errors"]) == 1
+
+
+def test_blocked_contacts_survive_a_reload(gmail, store):
+    gmail.sent_to["grace@compilers.example"] = ["Tue, 3 Mar 2026 10:00:00 -0800"]
+    contacts = [Contact(email="grace@compilers.example", first_name="Grace", company="C", title="T")]
+
+    outcome = create_drafts(
+        service=gmail,
+        store=store,
+        contacts=contacts,
+        templates=make_templates(),
+        attachments=[],
+        source_name="one.csv",
+        guard=ContactGuard(sent_checker=SentMailChecker(gmail)),
+    )
+    reloaded = store.load(outcome.batch.batch_id)
+
+    assert reloaded.blocked[0]["email"] == "grace@compilers.example"
+    assert reloaded.blocked[0]["first_contact"] == "2026-03-03"
 
 
 def test_delete_all_drafts_in_a_batch(gmail, store):

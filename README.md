@@ -16,6 +16,8 @@ rows with no usable address. Every dropped row is reported with a reason.
 - Preview the first few rendered messages before creating anything
 - Attach one or more files to every draft in a batch
 - Create one Gmail draft per contact
+- Skip anyone this account has emailed before, and report when that was
+- Keep a do not contact list that is never drafted to
 - Delete a whole batch, or selected drafts, when a batch is not good
 - Save a default template and sign off for the next session
 
@@ -93,11 +95,24 @@ You do not need to add scopes under Data Access. The app asks for the scope it
 needs at sign in time, and Google grants it because you are a test user on your
 own project.
 
-The app requests only `gmail.compose`, described by Google as "manage drafts and
-send emails". This app only ever creates and deletes drafts; it never calls the
-send endpoint. The scope cannot read your inbox. Google treats it as sensitive,
-which matters only if you later publish the app to other people; while it stays in
-testing with you as the test user, no review is involved.
+The app requests two scopes:
+
+- `gmail.compose`, "manage drafts and send emails". Used to create and delete
+  drafts. This app never calls the send endpoint.
+- `gmail.readonly`, "view your email messages and settings". Used only to search
+  sent mail for people you have already emailed, and only message headers are
+  read, never bodies. The narrower `gmail.metadata` scope cannot be used because
+  Google does not allow a search query with it, which would mean walking the whole
+  mailbox instead.
+
+Google classifies both as restricted, which matters only if you publish the app to
+other people. While it stays in testing with you as the test user, no review is
+involved.
+
+If you would rather not grant read access, remove `READ_SCOPE` from
+`GMAIL_SCOPES` in `app/config.py` and re-authorize. Everything still works except
+the sent mail search; the do not contact list and this app's own history do not
+need the read scope.
 
 Because the app is unverified, Google shows a warning at sign in. Click Advanced,
 then "Go to ... (unsafe)". The app is your own code running on your own machine.
@@ -196,12 +211,55 @@ Same operations without a browser.
   --sender-name "Your Name" \
   --attach deck.pdf
 
+# Report who has been contacted before, without creating drafts
+.venv/bin/python -m app.cli history contacts.csv
+
+# Add addresses to the do not contact list
+.venv/bin/python -m app.cli block someone@example.com --note "asked to be removed"
+
 # List batches, then delete one
 .venv/bin/python -m app.cli batches
 .venv/bin/python -m app.cli delete <batch-id>
 ```
 
 Arguments not given fall back to whatever was saved from the UI.
+
+## Never emailing the same person twice
+
+Before a draft is created, each address is checked against three sources. A match
+means no draft is created for that address, and the run reports it with the date of
+first contact.
+
+| Source | What it catches |
+|---|---|
+| Gmail sent mail | Anything sent from this account, including by hand or from a phone |
+| This app's history | Every address drafted in an earlier batch, including deleted drafts |
+| Do not contact list | Addresses you added by hand |
+
+Click `Check who was emailed before` to see the report without creating anything.
+The same report appears after `Create drafts`, listing each held back address, why,
+when it was first emailed, and how many messages exist.
+
+A deleted draft still counts as prior contact, because deleting a draft here does
+not prove the message was never sent.
+
+The sent mail search costs one Gmail lookup per contact, so a list of several
+hundred takes a while. Untick "Never draft to anyone this account has emailed
+before" to skip it; the do not contact list and this app's own history still apply.
+When a lookup fails, the report says coverage was partial rather than implying an
+all clear.
+
+Only message headers are read, never bodies.
+
+The do not contact list lives at `data/do-not-contact.txt`, one address per line,
+and can be edited by hand. A comma or two spaces after an address starts a note.
+Lines beginning with `#` are ignored.
+
+```
+# people who asked to be left alone
+ada@engines.example, asked not to be contacted
+grace@compilers.example
+```
 
 ## How deletion stays safe
 
@@ -251,6 +309,7 @@ does not need Gmail credentials:
 | `app/cli.py` | Command line interface |
 | `app/contacts.py` | CSV parsing and column matching |
 | `app/templating.py` | Placeholder substitution |
+| `app/history.py` | Prior contact checks and the do not contact list |
 | `app/drafts.py` | Rendering and batch create and delete |
 | `app/gmail_client.py` | OAuth and Gmail draft calls |
 | `app/message.py` | MIME assembly |

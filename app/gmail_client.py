@@ -147,6 +147,43 @@ class GmailDraftService:
             subject=subject,
         )
 
+    def search_sent(self, query: str, *, limit: int = 20) -> list[dict]:
+        """Search the mailbox and return message headers for the matches.
+
+        Only headers are fetched, never bodies, which keeps the response small and
+        means message text is not pulled into this process.
+
+        :param query: Gmail search query, the same syntax as the search box
+        :param limit: how many matches to inspect
+        :returns: messages in metadata format, empty when nothing matches
+        """
+        listing = _with_retry(
+            lambda: (
+                self._service.users().messages().list(userId="me", q=query, maxResults=limit, includeSpamTrash=False)
+            ),
+            "could not search sent mail",
+        )
+        identifiers = [item.get("id") for item in listing.get("messages") or [] if item.get("id")]
+
+        messages = []
+        for message_id in identifiers:
+            messages.append(
+                _with_retry(
+                    lambda message_id=message_id: (
+                        self._service.users()
+                        .messages()
+                        .get(
+                            userId="me",
+                            id=message_id,
+                            format="metadata",
+                            metadataHeaders=["To", "Cc", "Bcc", "Delivered-To", "Date"],
+                        )
+                    ),
+                    f"could not read message {message_id}",
+                )
+            )
+        return messages
+
     def delete_draft(self, draft_id: str) -> None:
         """Delete one draft. Already deleted drafts are treated as success."""
         try:

@@ -142,15 +142,34 @@ def main() -> int:
     code, payload = request("GET", "/api/settings")
     check("settings read back", payload.get("cc") == "cc@example.com")
 
+    print("do not contact list")
+    code, payload = request("GET", "/api/suppression")
+    check("suppression list readable", code == 200 and "entries" in payload)
+    code, payload = post_json("/api/suppression", {})
+    check("suppression rejects an empty request", code == 400)
+
     print("guards")
-    code, payload = post_json("/api/create-drafts", {"csv_id": csv_id, "subject_template": "s", "body_template": "b"})
-    check("create requires a connection", code == 401, str(payload))
     code, payload = post_json("/api/create-drafts", {"csv_id": csv_id, "subject_template": "  ", "body_template": "b"})
     check("empty subject rejected before Gmail is called", code == 400)
     code, payload = request("GET", "/api/batches/does-not-exist")
     check("unknown batch is a 404", code == 404)
-    code, payload = post_json("/api/connect", {})
-    check("connect without a client secret explains the fix", code == 400 and "client_secret.json" in payload["error"])
+
+    # These depend on whether this machine has already been authorized, and
+    # /api/connect is deliberately not called because it opens a browser window.
+    if status.get("connected"):
+        print("connected, so credential guards are checked against a live token")
+        code, payload = post_json("/api/check-history", {"csv_id": csv_id})
+        check("history check runs against Gmail", code == 200, str(payload)[:160])
+        check("history check reports coverage", "checked_sent_mail" in payload)
+        check("history check creates nothing", "blocked" in payload)
+    else:
+        print("not connected, so credential guards expect a 401")
+        code, payload = post_json(
+            "/api/create-drafts", {"csv_id": csv_id, "subject_template": "s", "body_template": "b"}
+        )
+        check("create requires a connection", code == 401, str(payload))
+        code, payload = post_json("/api/check-history", {"csv_id": csv_id})
+        check("history check requires a connection", code == 401)
 
     print(f"\n{passed} passed, {len(failed)} failed")
     for name in failed:

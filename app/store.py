@@ -27,6 +27,7 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "bcc": "",
     "send_as_html": False,
     "skip_incomplete": True,
+    "skip_previously_emailed": True,
 }
 
 
@@ -95,6 +96,8 @@ class Batch:
     drafts: list[DraftRecord] = field(default_factory=list)
     failures: list[dict[str, str]] = field(default_factory=list)
     skipped: list[dict[str, str]] = field(default_factory=list)
+    # Addresses held back because they had been contacted before.
+    blocked: list[dict[str, object]] = field(default_factory=list)
 
     @property
     def live_count(self) -> int:
@@ -131,6 +134,7 @@ class Batch:
             drafts=drafts,
             failures=list(payload.get("failures", [])),
             skipped=list(payload.get("skipped", [])),
+            blocked=list(payload.get("blocked", [])),
         )
 
 

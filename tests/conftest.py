@@ -20,16 +20,43 @@ class FakeGmail:
     """Stand in for GmailDraftService that records calls in memory.
 
     ``fail_on`` holds addresses that should raise, so failure handling can be
-    tested without a network.
+    tested without a network. ``sent_to`` maps an address to the dates it was
+    emailed, standing in for what a sent mail search would return.
     """
 
     drafts: dict[str, dict] = field(default_factory=dict)
     deleted: list[str] = field(default_factory=list)
     fail_on: set[str] = field(default_factory=set)
+    sent_to: dict[str, list[str]] = field(default_factory=dict)
+    search_failures: set[str] = field(default_factory=set)
+    searches: list[str] = field(default_factory=list)
     counter: int = 0
 
     def profile_email(self) -> str:
         return "tester@example.com"
+
+    def search_sent(self, query: str, *, limit: int = 20) -> list[dict]:
+        """Return metadata format messages for any address named in the query."""
+        self.searches.append(query)
+        address = query.replace("in:sent", "").replace("to:", "").strip().lower()
+        if address in self.search_failures:
+            raise GmailError(f"could not search sent mail: stubbed failure for {address}")
+
+        messages = []
+        for date in self.sent_to.get(address, []):
+            messages.append(
+                {
+                    "id": f"msg-{address}-{date}",
+                    "internalDate": "0",
+                    "payload": {
+                        "headers": [
+                            {"name": "To", "value": address},
+                            {"name": "Date", "value": date},
+                        ]
+                    },
+                }
+            )
+        return messages
 
     def create_draft(self, message, *, to: str, subject: str) -> DraftRef:
         if to in self.fail_on:
