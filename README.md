@@ -59,9 +59,27 @@ walkthroughs referring to "APIs and Services, OAuth consent screen" are stale.
    Click Create Client, set Application type to Desktop app, name it anything,
    and click Create.
 
-6. Download the JSON with the download icon next to the new client, then save it
-   as `credentials/client_secret.json` in this repo. The filename must match
-   exactly. The `credentials/` directory is gitignored.
+6. Get the client credentials onto disk as `credentials/client_secret.json`.
+   Either route works.
+
+   Route A, download the file. Open the client from the Clients list and look for
+   a download action, shown either as a download icon in the client's row or as
+   "Download JSON" on the client detail page. Save it as
+   `credentials/client_secret.json`. The filename must match exactly.
+
+   Route B, type the two values in. The console does not always offer a download,
+   so this helper builds the same file from the Client ID and client secret shown
+   on the client detail page:
+
+   ```bash
+   .venv/bin/python tools/write_client_secret.py
+   ```
+
+   It prompts for both values, checks they look right, and writes the file with
+   owner only permissions. If the client secret is hidden, use the console's
+   option to reveal or add a new secret.
+
+   The `credentials/` directory is gitignored either way.
 
 You do not need to add scopes under Data Access. The app asks for the scope it
 needs at sign in time, and Google grants it because you are a test user on your
@@ -229,6 +247,8 @@ does not need Gmail credentials:
 | `app/gmail_client.py` | OAuth and Gmail draft calls |
 | `app/message.py` | MIME assembly |
 | `app/store.py` | Settings and batch records on disk |
+| `tools/write_client_secret.py` | Build `client_secret.json` without a download |
+| `tools/smoke_test.py` | Check a running server over HTTP |
 
 ## Notes on scope
 
