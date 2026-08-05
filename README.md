@@ -62,22 +62,30 @@ walkthroughs referring to "APIs and Services, OAuth consent screen" are stale.
 6. Get the client credentials onto disk as `credentials/client_secret.json`.
    Either route works.
 
-   Route A, download the file. Open the client from the Clients list and look for
-   a download action, shown either as a download icon in the client's row or as
-   "Download JSON" on the client detail page. Save it as
-   `credentials/client_secret.json`. The filename must match exactly.
+   Route A, download the file. In the Clients list, use the download icon at the
+   right of the client's row. That yields the full client file. Install it with:
 
-   Route B, type the two values in. The console does not always offer a download,
-   so this helper builds the same file from the Client ID and client secret shown
-   on the client detail page:
+   ```bash
+   .venv/bin/python tools/install_client_secret.py
+   ```
+
+   That finds the newest download, checks it is a Desktop app client rather than a
+   Web one, and copies it into place. Pass a path if it is somewhere unusual.
+
+   Note the download icon on the client detail page, in the Client secrets table,
+   gives only the secret value rather than a full client file. The installer says
+   so if you use that one by mistake.
+
+   Route B, type the two values in. Open the client and copy Client ID and Client
+   secret from the detail page, then:
 
    ```bash
    .venv/bin/python tools/write_client_secret.py
    ```
 
-   It prompts for both values, checks they look right, and writes the file with
-   owner only permissions. If the client secret is hidden, use the console's
-   option to reveal or add a new secret.
+   This builds the same file from those two values. If the secret shows as masked
+   like `****QNZR`, use the copy icon beside it, or click Add secret to create one
+   you can read.
 
    The `credentials/` directory is gitignored either way.
 
@@ -247,6 +255,7 @@ does not need Gmail credentials:
 | `app/gmail_client.py` | OAuth and Gmail draft calls |
 | `app/message.py` | MIME assembly |
 | `app/store.py` | Settings and batch records on disk |
+| `tools/install_client_secret.py` | Install a downloaded OAuth client file |
 | `tools/write_client_secret.py` | Build `client_secret.json` without a download |
 | `tools/smoke_test.py` | Check a running server over HTTP |
 
