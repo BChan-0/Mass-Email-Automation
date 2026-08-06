@@ -22,18 +22,42 @@ from .history import normalize_address
 STATUS_DRAFT = "draft"
 STATUS_SCHEDULED = "scheduled"
 STATUS_SENT = "sent"
+STATUS_REPLIED = "replied"
+STATUS_BOUNCED = "bounced"
 STATUS_DELETED = "deleted"
 
 STATUS_LABELS = {
     STATUS_DRAFT: "Draft",
     STATUS_SCHEDULED: "Scheduled to send",
     STATUS_SENT: "Sent",
+    STATUS_REPLIED: "Replied",
+    STATUS_BOUNCED: "Delivery failed",
     STATUS_DELETED: "Deleted",
 }
 
-# Order used when one address has more than one message, most committed first. A
-# sent message outranks a scheduled one, which outranks an unsent draft.
-STATUS_PRECEDENCE = (STATUS_SENT, STATUS_SCHEDULED, STATUS_DRAFT, STATUS_DELETED)
+# Wording the tracking sheet's Status dropdown uses, which is not the same as the
+# wording the status view shows. A draft or a scheduled send has not reached anyone,
+# so neither is Reached Out yet.
+SHEET_STATUS = {
+    STATUS_DRAFT: "Drafted",
+    STATUS_SCHEDULED: "Scheduled",
+    STATUS_SENT: "Reached Out",
+    STATUS_REPLIED: "Replied",
+    STATUS_BOUNCED: "email failed :(",
+    STATUS_DELETED: "",
+}
+
+# Order used when one address has more than one message, most committed first. A reply
+# is the most informative outcome, then a bounce, which says the address is bad and
+# outranks the plain sent state it would otherwise report.
+STATUS_PRECEDENCE = (
+    STATUS_REPLIED,
+    STATUS_BOUNCED,
+    STATUS_SENT,
+    STATUS_SCHEDULED,
+    STATUS_DRAFT,
+    STATUS_DELETED,
+)
 
 
 def _header(message: dict, name: str) -> str:
@@ -127,3 +151,33 @@ def scheduled_by_address(messages: list[ScheduledMessage]) -> dict[str, Schedule
         for address in message.recipients:
             index.setdefault(address, message)
     return index
+
+
+def read_reply_senders(service, *, limit: int = 500) -> tuple[set[str], set[str], str]:
+    """Fetch who replied and whose address bounced.
+
+    :param service: authorized Gmail service, or None
+    :param limit: how many sent threads to inspect
+    :returns: repliers, bounced addresses, and an empty string, or empty sets and the
+        reason the lookup failed
+    """
+    if service is None:
+        return set(), set(), "no Gmail connection"
+    try:
+        replied, bounced = service.list_reply_senders(limit=limit)
+    except GmailError as error:
+        return set(), set(), str(error)
+    return replied, bounced, ""
+
+
+def to_sheet_date(value: str) -> str:
+    """Render a date the way the tracking sheet writes it, as M/D/YYYY.
+
+    :param value: header date, ISO date, or empty
+    :returns: the date without leading zeros, or an empty string
+    """
+    iso = to_iso_date(value)
+    if not iso:
+        return ""
+    year, month, day = iso.split("-")
+    return f"{int(month)}/{int(day)}/{year}"

@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import pytest
 
+from app.gmail_client import is_bounce_sender
 from app.mailbox import (
+    SHEET_STATUS,
     STATUS_PRECEDENCE,
+    read_reply_senders,
     read_scheduled,
     scheduled_by_address,
     to_iso_date,
+    to_sheet_date,
 )
 
 
@@ -83,7 +87,69 @@ def test_dates_are_reduced_to_a_plain_date(raw, expected):
     assert to_iso_date(raw) == expected
 
 
-def test_sent_outranks_scheduled_which_outranks_draft():
+def test_a_reply_outranks_sent_which_outranks_scheduled_then_draft():
     order = list(STATUS_PRECEDENCE)
 
-    assert order.index("sent") < order.index("scheduled") < order.index("draft")
+    assert order.index("replied") < order.index("sent") < order.index("scheduled") < order.index("draft")
+
+
+def test_replies_and_bounces_are_read_separately(gmail):
+    gmail.replied = {"ada@engines.example"}
+    gmail.bounced = {"gone@engines.example"}
+
+    senders, bounced, error = read_reply_senders(gmail)
+
+    assert senders == {"ada@engines.example"}
+    assert bounced == {"gone@engines.example"}
+    assert error == ""
+
+
+def test_a_reply_lookup_failure_is_reported(gmail):
+    gmail.replies_fail = True
+
+    senders, bounced, error = read_reply_senders(gmail)
+
+    assert senders == set()
+    assert bounced == set()
+    assert "could not search for replies" in error
+
+
+def test_reply_lookup_without_a_connection():
+    senders, bounced, error = read_reply_senders(None)
+
+    assert senders == set()
+    assert bounced == set()
+    assert error == "no Gmail connection"
+
+
+@pytest.mark.parametrize(
+    ("address", "expected"),
+    [
+        ("mailer-daemon@googlemail.com", True),
+        ("postmaster@example.com", True),
+        ("ada@engines.example", False),
+    ],
+)
+def test_bounce_senders_are_recognized(address, expected):
+    # A bounce lands in the thread it failed on, so it looks like a reply until named.
+    assert is_bounce_sender(address) is expected
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("Wed, 5 Aug 2026 17:00:00 -0700", "8/5/2026"),
+        ("2026-12-09T00:00:00+00:00", "12/9/2026"),
+        ("", ""),
+    ],
+)
+def test_sheet_dates_drop_leading_zeros(raw, expected):
+    # The sheet writes 8/5/2026, so an ISO date would not match the column.
+    assert to_sheet_date(raw) == expected
+
+
+def test_the_sheet_status_wording_matches_the_dropdown():
+    assert SHEET_STATUS["sent"] == "Reached Out"
+    assert SHEET_STATUS["replied"] == "Replied"
+    # A deleted draft reached nobody, so it leaves the cell empty.
+    assert SHEET_STATUS["deleted"] == ""

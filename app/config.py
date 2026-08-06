@@ -23,6 +23,11 @@ SENT_SEARCH_QUERY = "in:sent to:{email}"
 # no system label, so this search is the only way to find them.
 SCHEDULED_SEARCH_QUERY = "in:scheduled"
 
+# Threads this mailbox sent into that also received mail, which is what a reply looks
+# like. Gmail keeps a reply in the thread it answers, so a thread matching both sides
+# has been answered.
+REPLY_SEARCH_QUERY = "in:sent in:inbox"
+
 # Sent mail lookups cost one API call per contact, so a large list takes a while.
 # The prior contact report warns past this many contacts rather than looking stalled.
 HISTORY_SLOW_THRESHOLD = 250

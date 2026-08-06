@@ -425,6 +425,79 @@ def test_message_status_reports_a_sent_message_rather_than_deleted(client, conne
     assert row["when"] == "2026-08-04"
 
 
+def test_message_status_marks_a_contact_who_replied(client, connected, apollo_csv):
+    csv_id = upload(client, apollo_csv).get_json()["csv_id"]
+    client.post("/api/create-drafts", json={"csv_id": csv_id, "subject_template": "Hi", "body_template": "B"})
+    # Sending puts the message in sent mail, and the contact then writes back.
+    sent_id = next(iter(connected.drafts))
+    answered = connected.drafts[sent_id]["to"]
+    del connected.drafts[sent_id]
+    connected.sent_to[answered] = ["Tue, 4 Aug 2026 09:00:00 -0700"]
+    connected.replied = {answered}
+
+    payload = client.get("/api/message-status").get_json()
+    row = next(item for item in payload["rows"] if item["email"] == answered)
+
+    assert row["status"] == "replied"
+    assert row["replied"] is True
+    assert row["sheet_status"] == "Replied"
+    assert payload["replied_total"] == 1
+
+
+def test_a_reply_keeps_the_date_of_the_outreach_it_answers(client, connected, apollo_csv):
+    csv_id = upload(client, apollo_csv).get_json()["csv_id"]
+    client.post("/api/create-drafts", json={"csv_id": csv_id, "subject_template": "Hi", "body_template": "B"})
+    sent_id = next(iter(connected.drafts))
+    answered = connected.drafts[sent_id]["to"]
+    del connected.drafts[sent_id]
+    connected.sent_to[answered] = ["Tue, 4 Aug 2026 09:00:00 -0700"]
+    connected.replied = {answered}
+
+    row = next(item for item in client.get("/api/message-status").get_json()["rows"] if item["email"] == answered)
+
+    assert row["when"] == "2026-08-04"
+
+
+def test_a_bounce_is_not_counted_as_a_reply(client, connected, apollo_csv):
+    # A delivery failure lands in the thread it failed on, so it would read as a reply.
+    csv_id = upload(client, apollo_csv).get_json()["csv_id"]
+    client.post("/api/create-drafts", json={"csv_id": csv_id, "subject_template": "Hi", "body_template": "B"})
+    sent_id = next(iter(connected.drafts))
+    failed = connected.drafts[sent_id]["to"]
+    del connected.drafts[sent_id]
+    connected.sent_to[failed] = ["Tue, 4 Aug 2026 09:00:00 -0700"]
+    connected.bounced = {failed}
+
+    payload = client.get("/api/message-status").get_json()
+    row = next(item for item in payload["rows"] if item["email"] == failed)
+
+    assert row["status"] == "bounced"
+    assert row["replied"] is False
+    assert row["sheet_status"] == "email failed :("
+    assert payload["replied_total"] == 0
+    assert payload["bounced_total"] == 1
+
+
+def test_skipping_the_sent_check_also_skips_replies(client, connected, apollo_csv):
+    csv_id = upload(client, apollo_csv).get_json()["csv_id"]
+    client.post("/api/create-drafts", json={"csv_id": csv_id, "subject_template": "Hi", "body_template": "B"})
+    connected.replied = {"ada@engines.example"}
+
+    payload = client.get("/api/message-status?check_sent=0").get_json()
+
+    assert payload["checked_replies"] is False
+    assert payload["replied_total"] == 0
+
+
+def test_a_reply_lookup_failure_is_surfaced(client, connected, apollo_csv):
+    upload(client, apollo_csv)
+    connected.replies_fail = True
+
+    payload = client.get("/api/message-status").get_json()
+
+    assert any("replies" in error for error in payload["errors"])
+
+
 def test_message_status_needs_a_connection(client):
     assert client.get("/api/message-status").status_code == 401
 
@@ -459,9 +532,18 @@ def test_tracker_rows_cover_every_column(client, connected, apollo_csv):
     assert payload["columns"] == list(COLUMNS)
     assert len(payload["rows"]) == 3
     assert all(len(cells) == len(COLUMNS) for cells in payload["cells"])
-    header, *lines = payload["tsv"].split("\n")
-    assert header.split("\t") == payload["columns"]
+    # Data rows only, and every one carries a cell for every column.
+    lines = payload["tsv"].split("\n")
     assert len(lines) == 3
+    assert all(len(line.split("\t")) == len(COLUMNS) for line in lines)
+
+
+def test_the_header_can_be_asked_for(client, connected, apollo_csv):
+    csv_id = upload(client, apollo_csv).get_json()["csv_id"]
+
+    payload = client.post("/api/tracker", json={"csv_id": csv_id, "include_header": True}).get_json()
+
+    assert payload["tsv"].split("\n")[0].split("\t") == list(COLUMNS)
 
 
 def test_tracker_uses_the_scheduled_state_and_client_from_the_subject(client, connected, apollo_csv):
@@ -478,9 +560,45 @@ def test_tracker_uses_the_scheduled_state_and_client_from_the_subject(client, co
     rows = client.post("/api/tracker", json={"csv_id": csv_id}).get_json()["rows"]
     ada = next(row for row in rows if row["email"] == "ada@engines.example")
 
-    assert ada["status"] == "Scheduled to send"
+    assert ada["status"] == "Scheduled"
     assert ada["client"] == "Google"
-    assert ada["last_contact"] == "2026-08-05"
+    assert ada["last_contact"] == "8/5/2026"
+
+
+def test_tracker_offers_the_dropdown_choices(client, connected, apollo_csv):
+    csv_id = upload(client, apollo_csv).get_json()["csv_id"]
+
+    payload = client.post("/api/tracker", json={"csv_id": csv_id}).get_json()
+
+    assert "Reached Out" in payload["status_choices"]
+    assert "email failed :(" in payload["status_choices"]
+    assert payload["re_emailed_choices"] == ["No", "Yes"]
+
+
+def test_tracker_rows_carry_no_header_line(client, connected, apollo_csv):
+    # Rows are appended below what is already in the sheet, so a header would land
+    # in the middle of it.
+    csv_id = upload(client, apollo_csv).get_json()["csv_id"]
+
+    payload = client.post("/api/tracker", json={"csv_id": csv_id, "include_header": False}).get_json()
+
+    assert payload["tsv"].split("\n")[0].split("\t")[0] != "Client"
+    assert len(payload["tsv"].split("\n")) == 3
+
+
+def test_tracker_uses_the_sheet_wording_for_a_sent_message(client, connected, apollo_csv):
+    csv_id = upload(client, apollo_csv).get_json()["csv_id"]
+    client.post("/api/create-drafts", json={"csv_id": csv_id, "subject_template": "Hi", "body_template": "B"})
+    sent_id = next(iter(connected.drafts))
+    address = connected.drafts[sent_id]["to"]
+    del connected.drafts[sent_id]
+    connected.sent_to[address] = ["Tue, 4 Aug 2026 09:00:00 -0700"]
+
+    rows = client.post("/api/tracker", json={"csv_id": csv_id}).get_json()["rows"]
+    row = next(item for item in rows if item["email"] == address)
+
+    assert row["status"] == "Reached Out"
+    assert row["last_contact"] == "8/4/2026"
 
 
 def test_tracker_values_are_remembered_between_builds(client, connected, apollo_csv):

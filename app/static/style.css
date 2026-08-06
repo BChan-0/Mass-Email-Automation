@@ -327,6 +327,125 @@ textarea:focus {
   border-color: #e0c56b;
 }
 
+/* Spreadsheet mock. Ruled cells, a grey header strip, and column letters, so a glance
+   at this page matches what a paste into Sheets produces. */
+.sheet-wrap {
+  margin-top: 12px;
+  overflow: auto;
+  max-height: 60vh;
+  border: 1px solid #c0c0c0;
+  border-radius: 3px;
+  background: var(--surface);
+}
+
+.sheet {
+  border-collapse: collapse;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.sheet th,
+.sheet td {
+  border: 1px solid #d4d4d4;
+  padding: 0;
+  vertical-align: middle;
+}
+
+/* Column letter strip and row number gutter. */
+.sheet .colhead,
+.sheet .rowhead {
+  background: #f0f0f0;
+  color: #444;
+  font-weight: 400;
+  font-size: 11px;
+  text-align: center;
+  padding: 3px 6px;
+  position: sticky;
+  border-color: #c0c0c0;
+}
+
+.sheet .colhead {
+  top: 0;
+  z-index: 3;
+}
+
+.sheet .rowhead {
+  left: 0;
+  z-index: 2;
+  min-width: 34px;
+}
+
+.sheet .corner {
+  top: 0;
+  left: 0;
+  z-index: 4;
+}
+
+/* The header row holding the real column names. */
+.sheet .namerow td {
+  background: #e8eef7;
+  font-weight: 700;
+  padding: 4px 7px;
+  position: sticky;
+  top: 20px;
+  z-index: 1;
+}
+
+.sheet td.cell {
+  padding: 0;
+  max-width: 260px;
+}
+
+.sheet td.cell > span {
+  display: block;
+  padding: 4px 7px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 260px;
+}
+
+.sheet td.cell input,
+.sheet td.cell select {
+  width: 100%;
+  border: none;
+  background: #fffdf0;
+  font: inherit;
+  padding: 3px 6px;
+  border-radius: 0;
+}
+
+.sheet td.cell select {
+  appearance: none;
+  cursor: pointer;
+}
+
+.sheet td.cell input:focus,
+.sheet td.cell select:focus {
+  outline: 2px solid #1a73e8;
+  outline-offset: -2px;
+}
+
+.sheet td.blank > span {
+  color: #b0b0b0;
+}
+
+.filters {
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.chip.filter {
+  font-family: inherit;
+  font-size: 12.5px;
+}
+
+.chip.filter.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
 .status-pill {
   display: inline-block;
   font-size: 11.5px;
@@ -349,6 +468,11 @@ textarea:focus {
 .status-sent {
   color: var(--ok);
   border-color: var(--ok);
+}
+
+.status-bounced {
+  color: var(--danger);
+  border-color: var(--danger);
 }
 
 .status-deleted {

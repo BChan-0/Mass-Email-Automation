@@ -40,12 +40,26 @@ from .history import (
     normalize_address,
 )
 from .library import CsvLibrary, apply_saved_edits
-from .mailbox import STATUS_LABELS, read_scheduled, scheduled_by_address
+from .mailbox import (
+    SHEET_STATUS,
+    STATUS_LABELS,
+    read_reply_senders,
+    read_scheduled,
+    scheduled_by_address,
+)
 from .markup import looks_like_markdown, render_markdown
 from .message import Attachment
 from .store import BatchStore, load_settings, save_settings
 from .templating import KNOWN_FIELDS, find_placeholders
-from .tracker import COLUMNS, TrackerFields, build_rows, merge_states, to_tsv
+from .tracker import (
+    COLUMNS,
+    RE_EMAILED_CHOICES,
+    STATUS_CHOICES,
+    TrackerFields,
+    build_rows,
+    merge_states,
+    to_tsv,
+)
 
 # Contact fields the table lets you edit. Other CSV columns stay as imported.
 EDITABLE_FIELDS = ("email", "first_name", "last_name", "company", "title")
@@ -667,17 +681,21 @@ def create_app(paths: Paths | None = None) -> Flask:
         if service is None:
             return error_response
 
+        check_sent = request.args.get("check_sent", "1") != "0"
         scheduled, scheduled_error = read_scheduled(service)
         live_ids, live_error = fetch_live_draft_ids(service)
+        replied, bounced, reply_error = read_reply_senders(service) if check_sent else (set(), set(), "")
         batches = store.list_batches()
         # Sent mail has to be consulted, or a message that has left the drafts list
         # because it was sent would be reported as deleted.
-        checker = SentMailChecker(service, enabled=bool(request.args.get("check_sent", "1") != "0"))
+        checker = SentMailChecker(service, enabled=check_sent)
         states = merge_states(
             scheduled=scheduled_by_address(scheduled),
             live_draft_ids=live_ids,
             batches=batches,
             sent_lookup=checker.check if checker.enabled else None,
+            replied=replied,
+            bounced=bounced,
         )
 
         rows = [
@@ -685,9 +703,12 @@ def create_app(paths: Paths | None = None) -> Flask:
                 "email": address,
                 "status": state.status,
                 "label": STATUS_LABELS.get(state.status, state.status),
+                "sheet_status": SHEET_STATUS.get(state.status, ""),
                 "subject": state.subject,
                 "when": state.when,
                 "re_emailed": state.re_emailed,
+                "replied": address in replied,
+                "bounced": address in bounced,
             }
             for address, state in sorted(states.items())
         ]
@@ -702,7 +723,10 @@ def create_app(paths: Paths | None = None) -> Flask:
                 "counts": counts,
                 "total": len(rows),
                 "scheduled_total": len(scheduled),
-                "errors": [item for item in (scheduled_error, live_error) if item],
+                "replied_total": sum(1 for row in rows if row["replied"]),
+                "bounced_total": sum(1 for row in rows if row["bounced"]),
+                "checked_replies": check_sent,
+                "errors": [item for item in (scheduled_error, live_error, reply_error) if item],
             }
         )
 
@@ -719,14 +743,18 @@ def create_app(paths: Paths | None = None) -> Flask:
         if service is None:
             return error_response
 
+        check_sent = bool(payload.get("check_sent", True))
         scheduled, scheduled_error = read_scheduled(service)
         live_ids, _live_error = fetch_live_draft_ids(service)
-        checker = SentMailChecker(service, enabled=bool(payload.get("check_sent", True)))
+        replied, bounced, reply_error = read_reply_senders(service) if check_sent else (set(), set(), "")
+        checker = SentMailChecker(service, enabled=check_sent)
         states = merge_states(
             scheduled=scheduled_by_address(scheduled),
             live_draft_ids=live_ids,
             batches=store.list_batches(),
             sent_lookup=checker.check if checker.enabled else None,
+            replied=replied,
+            bounced=bounced,
         )
 
         rows = build_rows(
@@ -741,8 +769,12 @@ def create_app(paths: Paths | None = None) -> Flask:
                 "columns": list(COLUMNS),
                 "rows": [row.to_dict() for row in rows],
                 "cells": [row.as_cells() for row in rows],
-                "tsv": to_tsv(rows, include_header=bool(payload.get("include_header", True))),
-                "errors": [item for item in (scheduled_error,) if item],
+                # No header by default, since rows are appended below what the sheet
+                # already holds. The browser builds the same text as you edit cells.
+                "tsv": to_tsv(rows, include_header=bool(payload.get("include_header", False))),
+                "status_choices": list(STATUS_CHOICES),
+                "re_emailed_choices": list(RE_EMAILED_CHOICES),
+                "errors": [item for item in (scheduled_error, reply_error) if item],
             }
         )
 

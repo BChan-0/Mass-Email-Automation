@@ -269,8 +269,17 @@ the message.
 |---|---|
 | Draft | Sitting in Gmail, no send time set |
 | Scheduled to send | Gmail is holding it for a later time |
-| Sent | In sent mail |
+| Sent | In sent mail, no answer yet |
+| Replied | The contact wrote back |
 | Deleted | Created and then deleted, and no longer in Gmail |
+
+A reply is found by looking for a sent thread that also holds inbound mail, since
+Gmail keeps a reply in the thread it answers. Only the From header of each message is
+read, never a body.
+
+Filter the list with the buttons above it: `They replied`, `Sent, no reply` for the
+follow up pile, any single status, or `Re-emailed`. The search box matches an address
+or a subject.
 
 Scheduled messages are found through the `in:scheduled` search rather than the
 drafts list, because Gmail keeps them out of that list and gives them no label of
@@ -290,26 +299,35 @@ outreach spreadsheet uses:
 `Contact LinkedIn`, `Re-Emailed?`, `HPL Assignee`, `Notes`,
 `Date of most recent contact`
 
+It is laid out as the spreadsheet reads it, with column letters across the top and
+numbered rows down the side, so the page and the pasted result look the same. Set
+`First sheet row` to the row you are pasting at and the gutter numbers follow.
+
 Everything is filled in where the app has a value. Client comes from the subject
 line, which follows `[Harvard Product Lab x CLIENT]`, falling back to the company
-column. Status and the contact date come from the mailbox. LinkedIn comes from the
-CSV. Notes is always left blank for you.
+column. Status and the contact date come from the mailbox, in the sheet's own
+wording: a sent message is `Reached Out`, an answered one is `Replied`. Dates are
+written `8/5/2026` to match the column. LinkedIn comes from the CSV. Notes is always
+left blank for you.
 
 A contact with no value for a column gets an empty cell rather than being left out,
 so the columns stay aligned when pasted.
 
-Client, Status, LinkedIn, Re-Emailed, Assignee, and Notes can be typed over in the
-table. `Remember my entries` saves them against the contact's address, and they
-come back the next time that address appears in any list, in `data/tracker.json`.
+Status and Re-Emailed are dropdowns in the sheet, so they are dropdowns here, with
+the same choices including ones the app cannot work out such as `email failed :(`.
+Client, LinkedIn, Assignee, and Notes are free text. `Remember my entries` saves them
+against the contact's address, and they come back the next time that address appears
+in any list, in `data/tracker.json`.
 
 `Show remembered values` lists everything saved this way, with the file it lives in,
 so a value in a row is never a mystery. Forget one address, or all of them, from
 there.
 
-`Copy for Sheets` puts the rows on the clipboard as tab separated text. In Google
-Sheets, click the first cell and paste; each value lands in its own column with no
-import step. The text box below holds the same thing in case the browser blocks
-clipboard access, which happens on plain http.
+`Copy rows` puts the data rows on the clipboard as tab separated text, with no header
+line, since they are appended below rows that already exist. In Google Sheets, click
+the first cell of the row you are adding to and paste; each value lands in its own
+column with no import step. The collapsed box below holds the same text in case the
+browser blocks clipboard access, which happens on plain http.
 
 ## Editing contacts before drafting
 

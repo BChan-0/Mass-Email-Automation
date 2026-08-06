@@ -214,9 +214,24 @@
       <button id="refresh-status" type="button" class="btn btn-secondary">Refresh</button>
       <label class="check" style="margin: 0">
         <input id="status-check-sent" type="checkbox" checked>
-        <span>Check sent mail, needed to tell a sent message from a deleted one</span>
+        <span>Read sent mail and replies, needed to tell sent from deleted</span>
       </label>
     </div>
+
+    <div class="row filters">
+      <span class="hint" style="margin: 0">Show</span>
+      <button type="button" class="chip filter active" data-filter="all">All</button>
+      <button type="button" class="chip filter" data-filter="replied">They replied</button>
+      <button type="button" class="chip filter" data-filter="awaiting">Sent, no reply</button>
+      <button type="button" class="chip filter" data-filter="sent">Sent</button>
+      <button type="button" class="chip filter" data-filter="scheduled">Scheduled</button>
+      <button type="button" class="chip filter" data-filter="draft">Draft</button>
+      <button type="button" class="chip filter" data-filter="bounced">Delivery failed</button>
+      <button type="button" class="chip filter" data-filter="deleted">Deleted</button>
+      <button type="button" class="chip filter" data-filter="re_emailed">Re-emailed</button>
+      <input id="status-search" type="text" placeholder="search address or subject" style="max-width: 240px">
+    </div>
+
     <div id="status-counts" class="row"></div>
     <div id="status-area"></div>
   </section>
@@ -226,18 +241,22 @@
   <section class="card">
     <h2>Tracking sheet</h2>
     <p class="hint">
-      Rows for the outreach spreadsheet, built from the loaded CSV and the current
-      state of each message. Fill in what you want, then copy and paste into Google
-      Sheets. Everything except Notes is filled in where the app has a value.
+      Laid out as the spreadsheet will read it, so what you see is what lands after a
+      paste. Status, Re-Emailed, and Assignee are dropdowns in the sheet, so they are
+      dropdowns here too. Notes is yours to write.
     </p>
     <div class="row">
-      <label class="field" style="margin: 0; max-width: 220px">
+      <label class="field" style="margin: 0; max-width: 200px">
         <span>Default HPL Assignee</span>
-        <input id="sheet-assignee" type="text" placeholder="who is following up">
+        <input id="sheet-assignee" type="text" placeholder="Bonnie." value="Bonnie.">
+      </label>
+      <label class="field" style="margin: 0; max-width: 130px">
+        <span>First sheet row</span>
+        <input id="sheet-first-row" type="text" placeholder="315" value="2">
       </label>
       <button id="build-sheet" type="button" class="btn btn-secondary">Build rows</button>
       <button id="save-sheet" type="button" class="btn btn-quiet">Remember my entries</button>
-      <button id="copy-sheet" type="button" class="btn btn-primary">Copy for Sheets</button>
+      <button id="copy-sheet" type="button" class="btn btn-primary">Copy rows</button>
       <span id="sheet-status" class="hint"></span>
     </div>
     <div class="row">
@@ -247,13 +266,15 @@
       <span id="remembered-summary" class="hint"></span>
     </div>
     <div id="remembered-area" class="detail hidden"></div>
-    <div class="table-wrap">
-      <table id="sheet-table" class="grid"></table>
+
+    <div class="sheet-wrap">
+      <table id="sheet-table" class="sheet"></table>
     </div>
-    <label class="field">
-      <span>Tab separated text, in case copying does not work</span>
+
+    <details class="more">
+      <summary>Tab separated text, in case copying does not work</summary>
       <textarea id="sheet-tsv" rows="6" readonly></textarea>
-    </label>
+    </details>
   </section>
 </main>
 

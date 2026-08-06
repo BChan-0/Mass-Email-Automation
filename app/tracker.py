@@ -18,7 +18,7 @@ from dataclasses import dataclass, field, fields
 from pathlib import Path
 
 from .history import normalize_address
-from .mailbox import STATUS_LABELS, STATUS_PRECEDENCE, to_iso_date
+from .mailbox import SHEET_STATUS, STATUS_PRECEDENCE, to_iso_date, to_sheet_date
 from .store import _write_json
 
 # Column headers, in the order the sheet expects them.
@@ -34,6 +34,22 @@ COLUMNS = (
     "Notes",
     "Date of most recent contact",
 )
+
+# Values the sheet's dropdown columns accept, offered in the UI so a pasted row does
+# not land outside the dropdown. Status carries entries the app cannot derive, such as
+# a bounce, which is why it is a superset of SHEET_STATUS.
+STATUS_CHOICES = (
+    "Reached Out",
+    "Replied",
+    "Drafted",
+    "Scheduled",
+    "email failed :(",
+    "Meeting Booked",
+    "Not Interested",
+    "No Response",
+)
+
+RE_EMAILED_CHOICES = ("No", "Yes")
 
 # Subject lines follow "[Harvard Product Lab x CLIENT] ...", so the client name can
 # be read back out of a message that was already created.
@@ -222,7 +238,9 @@ def build_rows(
 
         linkedin = stored.get("linkedin") or _linkedin_from(contact)
         client = stored.get("client") or client_from_subject(state.subject) or contact.company
-        status = stored.get("status_override") or STATUS_LABELS.get(state.status, "")
+        # The sheet's Status column is a dropdown, so it takes that wording rather than
+        # the wording the status view shows.
+        status = stored.get("status_override") or SHEET_STATUS.get(state.status, "")
 
         rows.append(
             TrackerRow(
@@ -235,7 +253,7 @@ def build_rows(
                 re_emailed=stored.get("re_emailed") or (state.re_emailed if state.status else ""),
                 assignee=stored.get("assignee") or default_assignee,
                 notes=stored.get("notes", ""),
-                last_contact=state.when,
+                last_contact=to_sheet_date(state.when),
             )
         )
     return rows
@@ -254,18 +272,26 @@ def _linkedin_from(contact) -> str:
 
 
 def merge_states(
-    *, scheduled: dict, live_draft_ids: set[str] | None, batches, sent_lookup=None
+    *,
+    scheduled: dict,
+    live_draft_ids: set[str] | None,
+    batches,
+    sent_lookup=None,
+    replied: set[str] | None = None,
+    bounced: set[str] | None = None,
 ) -> dict[str, MessageState]:
     """Work out the current state of every address this app has touched.
 
-    Scheduled beats draft, and sent beats both, so an address with several messages
-    is reported at its most committed state.
+    Scheduled beats draft, sent beats both, and a reply beats everything, so an address
+    with several messages is reported at its most committed state.
 
     :param scheduled: address to ScheduledMessage, from app.mailbox
     :param live_draft_ids: draft ids currently in Gmail, or None when unknown
     :param batches: batch records this app has written
     :param sent_lookup: optional callable taking an address and returning a
         PriorContact, or None when it finds nothing
+    :param replied: addresses that have written back
+    :param bounced: addresses whose delivery failed
     :returns: address to state
     """
     states: dict[str, MessageState] = {}
@@ -317,5 +343,16 @@ def merge_states(
             # signal that this person was contacted more than once.
             if found.message_count > 1:
                 state.message_keys.update(f"sent-{key}-{n}" for n in range(found.message_count))
+
+    # Applied last, and each keeps the date of the outreach it concerns rather than
+    # overwriting it. A bounce means the address is bad, so it outranks sent.
+    for address in bounced or ():
+        key = normalize_address(address)
+        if key in states:
+            note(key, "bounced", states[key].subject, states[key].when)
+    for address in replied or ():
+        key = normalize_address(address)
+        if key in states:
+            note(key, "replied", states[key].subject, states[key].when)
 
     return states

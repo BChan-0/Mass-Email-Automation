@@ -35,6 +35,10 @@ class FakeGmail:
     # optionally cc. Shaped this way so a test can write one line per message.
     scheduled: list[dict] = field(default_factory=list)
     scheduled_fails: bool = False
+    # Addresses that have written back, and ones whose delivery failed.
+    replied: set[str] = field(default_factory=set)
+    bounced: set[str] = field(default_factory=set)
+    replies_fail: bool = False
     counter: int = 0
 
     def profile_email(self) -> str:
@@ -68,6 +72,12 @@ class FakeGmail:
                 }
             )
         return messages
+
+    def list_reply_senders(self, *, limit: int = 500) -> tuple[set[str], set[str]]:
+        """Who replied and whose address bounced, as a thread scan would report."""
+        if self.replies_fail:
+            raise GmailError("could not search for replies: stubbed failure")
+        return set(self.replied), set(self.bounced)
 
     def search_sent(self, query: str, *, limit: int = 20) -> list[dict]:
         """Return metadata format messages for any address named in the query."""

@@ -11,7 +11,10 @@ const state = {
   // Row index to the field names that differ from the uploaded file.
   editedRows: {},
   statusLoaded: false,
+  statusRows: [],
+  statusFilter: "all",
   sheetRows: [],
+  sheetChoices: { status: [], re_emailed: [] },
 };
 
 const el = (id) => document.getElementById(id);
@@ -935,6 +938,83 @@ async function deleteFromBatch(batchId, draftIds, confirmMessage) {
 
 // Message status
 
+// Each filter is a predicate over one status row.
+const STATUS_FILTERS = {
+  all: () => true,
+  replied: (row) => row.replied,
+  awaiting: (row) => row.status === "sent" && !row.replied,
+  sent: (row) => row.status === "sent" || row.status === "replied",
+  scheduled: (row) => row.status === "scheduled",
+  draft: (row) => row.status === "draft",
+  bounced: (row) => row.status === "bounced",
+  deleted: (row) => row.status === "deleted",
+  re_emailed: (row) => row.re_emailed === "Yes",
+};
+
+function renderStatusRows() {
+  const area = el("status-area");
+  const existing = area.querySelector(".table-wrap");
+  if (existing) existing.remove();
+
+  const search = el("status-search").value.trim().toLowerCase();
+  const keep = STATUS_FILTERS[state.statusFilter] || STATUS_FILTERS.all;
+  const rows = state.statusRows.filter(
+    (row) =>
+      keep(row) &&
+      (!search ||
+        row.email.toLowerCase().includes(search) ||
+        (row.subject || "").toLowerCase().includes(search))
+  );
+
+  const wrap = document.createElement("div");
+  wrap.className = "table-wrap";
+
+  if (!rows.length) {
+    const empty = document.createElement("div");
+    empty.className = "hint";
+    empty.textContent = state.statusRows.length
+      ? "No rows match that filter."
+      : "Nothing tracked yet.";
+    wrap.appendChild(empty);
+    area.appendChild(wrap);
+    return;
+  }
+
+  const table = document.createElement("table");
+  table.className = "grid";
+  const head = table.createTHead().insertRow();
+  ["Status", "Replied", "Address", "Subject", "Date", "Re-emailed"].forEach((title) => {
+    const cell = document.createElement("th");
+    cell.textContent = title;
+    head.appendChild(cell);
+  });
+
+  const body = table.createTBody();
+  rows.forEach((row) => {
+    const line = body.insertRow();
+    const pill = document.createElement("span");
+    pill.className = `status-pill status-${row.status}`;
+    pill.textContent = row.label;
+    line.insertCell().appendChild(pill);
+    [
+      row.replied ? "Yes" : row.bounced ? "bounced" : "",
+      row.email,
+      row.subject,
+      row.when,
+      row.re_emailed,
+    ].forEach((value) => {
+      line.insertCell().textContent = value || "";
+    });
+  });
+  wrap.appendChild(table);
+
+  const shown = document.createElement("div");
+  shown.className = "hint";
+  shown.textContent = `${rows.length} of ${state.statusRows.length} shown`;
+  wrap.appendChild(shown);
+  area.appendChild(wrap);
+}
+
 async function loadStatus() {
   const area = el("status-area");
   area.textContent = "Reading Gmail, this takes a moment on a large mailbox";
@@ -945,7 +1025,7 @@ async function loadStatus() {
 
     const counts = el("status-counts");
     counts.textContent = "";
-    ["sent", "scheduled", "draft", "deleted"].forEach((key) => {
+    ["replied", "bounced", "sent", "scheduled", "draft", "deleted"].forEach((key) => {
       if (!result.counts[key]) return;
       const chip = document.createElement("span");
       chip.className = "count-chip";
@@ -968,29 +1048,8 @@ async function loadStatus() {
       area.appendChild(note);
     }
 
-    const wrap = document.createElement("div");
-    wrap.className = "table-wrap";
-    const table = document.createElement("table");
-    table.className = "grid";
-    const head = table.createTHead().insertRow();
-    ["Status", "Address", "Subject", "Date", "Re-emailed"].forEach((title) => {
-      const cell = document.createElement("th");
-      cell.textContent = title;
-      head.appendChild(cell);
-    });
-    const body = table.createTBody();
-    result.rows.forEach((row) => {
-      const line = body.insertRow();
-      const pill = document.createElement("span");
-      pill.className = `status-pill status-${row.status}`;
-      pill.textContent = row.label;
-      line.insertCell().appendChild(pill);
-      [row.email, row.subject, row.when, row.re_emailed].forEach((value) => {
-        line.insertCell().textContent = value || "";
-      });
-    });
-    wrap.appendChild(table);
-    area.appendChild(wrap);
+    state.statusRows = result.rows;
+    renderStatusRows();
   } catch (error) {
     area.textContent = "";
     const message = document.createElement("div");
@@ -1017,70 +1076,139 @@ async function buildSheet() {
       default_assignee: el("sheet-assignee").value,
     });
     state.sheetRows = result.rows;
+    state.sheetColumns = result.columns;
+    state.sheetChoices = {
+      status: result.status_choices || [],
+      re_emailed: result.re_emailed_choices || [],
+    };
     renderSheet(result.columns, result.rows);
-    el("sheet-tsv").value = result.tsv;
     el("sheet-status").textContent = `${result.rows.length} row(s)`;
     el("sheet-status").className = "hint";
+    if (result.errors?.length) {
+      toast(result.errors[0], true);
+    }
   } catch (error) {
     el("sheet-status").textContent = error.message;
     el("sheet-status").className = "error";
   }
 }
 
+// Field order has to match the column order the server sends.
+const SHEET_ORDER = [
+  "client",
+  "status",
+  "name",
+  "title",
+  "email",
+  "linkedin",
+  "re_emailed",
+  "assignee",
+  "notes",
+  "last_contact",
+];
+
+// Columns the sheet defines as dropdowns, so a typed value cannot fall outside them.
+const SHEET_DROPDOWNS = { status: "status", re_emailed: "re_emailed" };
+
+function columnLetter(index) {
+  let letter = "";
+  let value = index;
+  while (value >= 0) {
+    letter = String.fromCharCode(65 + (value % 26)) + letter;
+    value = Math.floor(value / 26) - 1;
+  }
+  return letter;
+}
+
+// Draws the rows the way a spreadsheet does, with column letters across the top and
+// numbered rows down the side, so this page and the pasted result look the same.
 function renderSheet(columns, rows) {
   const table = el("sheet-table");
   table.textContent = "";
-  const head = table.createTHead().insertRow();
-  columns.forEach((title) => {
+  const firstRow = Math.max(1, parseInt(el("sheet-first-row").value, 10) || 2);
+
+  const letters = table.createTHead().insertRow();
+  const corner = document.createElement("th");
+  corner.className = "colhead corner";
+  letters.appendChild(corner);
+  columns.forEach((_name, index) => {
     const cell = document.createElement("th");
-    cell.textContent = title;
-    head.appendChild(cell);
+    cell.className = "colhead";
+    cell.textContent = columnLetter(index);
+    letters.appendChild(cell);
   });
 
-  // Field order has to match the column order the server sends.
-  const order = [
-    "client",
-    "status",
-    "name",
-    "title",
-    "email",
-    "linkedin",
-    "re_emailed",
-    "assignee",
-    "notes",
-    "last_contact",
-  ];
   const body = table.createTBody();
+
+  // The sheet's own header row, shown so the column names line up with the letters.
+  const names = body.insertRow();
+  names.className = "namerow";
+  const nameGutter = names.insertCell();
+  nameGutter.className = "rowhead";
+  nameGutter.textContent = "1";
+  columns.forEach((name) => {
+    names.insertCell().textContent = name;
+  });
+
   rows.forEach((row, index) => {
     const line = body.insertRow();
-    order.forEach((field) => {
+    const gutter = line.insertCell();
+    gutter.className = "rowhead";
+    gutter.textContent = String(firstRow + index);
+
+    SHEET_ORDER.forEach((field) => {
       const cell = line.insertCell();
+      cell.className = "cell";
+      const value = row[field] || "";
+
       if (!SHEET_EDITABLE.includes(field)) {
-        cell.textContent = row[field] || "";
+        const text = document.createElement("span");
+        text.textContent = value;
+        if (!value) cell.classList.add("blank");
+        cell.appendChild(text);
         return;
       }
-      const input = document.createElement("input");
-      input.type = "text";
-      input.value = row[field] || "";
-      input.dataset.field = field;
-      input.dataset.row = String(index);
-      input.addEventListener("input", () => {
-        state.sheetRows[index][field] = input.value;
-        el("sheet-tsv").value = sheetToTsv(columns, order);
+
+      const choices = state.sheetChoices[SHEET_DROPDOWNS[field]];
+      const control =
+        choices && choices.length
+          ? buildSheetSelect(choices, value)
+          : Object.assign(document.createElement("input"), { type: "text", value });
+      control.dataset.field = field;
+      control.dataset.row = String(index);
+      control.addEventListener("change", () => {
+        state.sheetRows[index][field] = control.value;
+        el("sheet-tsv").value = sheetToTsv(columns, SHEET_ORDER);
       });
-      cell.appendChild(input);
+      control.addEventListener("input", () => {
+        state.sheetRows[index][field] = control.value;
+        el("sheet-tsv").value = sheetToTsv(columns, SHEET_ORDER);
+      });
+      cell.appendChild(control);
     });
   });
-  el("sheet-tsv").value = sheetToTsv(columns, order);
+  el("sheet-tsv").value = sheetToTsv(columns, SHEET_ORDER);
 }
 
-function sheetToTsv(columns, order) {
-  const clean = (value) => String(value || "").replace(/[\t\r\n]+/g, " ").trim();
-  const lines = [columns.join("\t")];
-  state.sheetRows.forEach((row) => {
-    lines.push(order.map((field) => clean(row[field])).join("\t"));
+function buildSheetSelect(choices, value) {
+  const select = document.createElement("select");
+  // A blank option matters because an empty cell is a valid state in the sheet.
+  const options = choices.includes(value) || !value ? ["", ...choices] : ["", value, ...choices];
+  options.forEach((choice) => {
+    const option = document.createElement("option");
+    option.value = choice;
+    option.textContent = choice;
+    if (choice === value) option.selected = true;
+    select.appendChild(option);
   });
-  return lines.join("\n");
+  return select;
+}
+
+// Data rows only, with no header. These get appended below rows that already exist,
+// so a header line would land in the middle of the sheet.
+function sheetToTsv(_columns, order) {
+  const clean = (value) => String(value || "").replace(/[\t\r\n]+/g, " ").trim();
+  return state.sheetRows.map((row) => order.map((field) => clean(row[field])).join("\t")).join("\n");
 }
 
 async function saveSheetFields() {
@@ -1176,7 +1304,8 @@ async function copySheet() {
   }
   try {
     await navigator.clipboard.writeText(text);
-    toast("Copied. Paste into Google Sheets with the first cell selected.");
+    const first = el("sheet-first-row").value.trim() || "the next empty row";
+    toast(`Copied ${state.sheetRows.length} row(s). In Sheets, click cell A${first} and paste.`);
   } catch (error) {
     // Clipboard access needs a secure context, which plain http may not be.
     el("sheet-tsv").select();
@@ -1261,6 +1390,19 @@ function wire() {
     el("library-list").classList.toggle("hidden");
   });
   el("refresh-status").addEventListener("click", loadStatus);
+  document.querySelectorAll(".chip.filter").forEach((button) => {
+    button.addEventListener("click", () => {
+      document.querySelectorAll(".chip.filter").forEach((other) => other.classList.remove("active"));
+      button.classList.add("active");
+      state.statusFilter = button.dataset.filter;
+      renderStatusRows();
+    });
+  });
+  el("status-search").addEventListener("input", renderStatusRows);
+  el("sheet-first-row").addEventListener("input", () => {
+    if (state.sheetRows.length) renderSheet(state.sheetColumns, state.sheetRows);
+  });
+
   el("build-sheet").addEventListener("click", buildSheet);
   el("save-sheet").addEventListener("click", saveSheetFields);
   el("copy-sheet").addEventListener("click", copySheet);

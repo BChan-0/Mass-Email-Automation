@@ -14,7 +14,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-from .config import GMAIL_SCOPES, SCHEDULED_SEARCH_QUERY
+from .config import GMAIL_SCOPES, REPLY_SEARCH_QUERY, SCHEDULED_SEARCH_QUERY
 from .message import encode_message
 
 # Retried on the assumption the request itself is fine: rate limits and transient
@@ -26,6 +26,32 @@ MAX_ATTEMPTS = 5
 # Headers fetched for a message. Bodies are never requested. Subject is included so
 # the status view can name a message without a second call.
 METADATA_HEADERS = ["To", "Cc", "Bcc", "Delivered-To", "Date", "Subject", "From"]
+
+
+# Senders that mean delivery failed rather than a person answering. A bounce lands in
+# the thread it failed on, so it looks like a reply unless it is named.
+BOUNCE_SENDERS = ("mailer-daemon@", "postmaster@")
+
+
+def _bare_address(value: str) -> str:
+    """Reduce a From header to a lowercase address, dropping any display name."""
+    text = (value or "").strip()
+    if "<" in text and ">" in text:
+        text = text[text.index("<") + 1 : text.index(">")]
+    return text.strip().lower()
+
+
+def is_bounce_sender(address: str) -> bool:
+    """True when an address is a mail system reporting a failure."""
+    return any(address.startswith(marker) for marker in BOUNCE_SENDERS)
+
+
+def _header_value(message: dict, name: str) -> str:
+    """Read one header out of a metadata format message."""
+    for header in (message.get("payload") or {}).get("headers") or []:
+        if (header.get("name") or "").lower() == name.lower():
+            return header.get("value") or ""
+    return ""
 
 
 class AuthError(RuntimeError):
@@ -140,11 +166,18 @@ class GmailDraftService:
         # cache_discovery is off because the file cache warns when no writable
         # cache directory is available.
         self._service = build("gmail", "v1", credentials=credentials, cache_discovery=False)
+        self._own: str | None = None
 
     def profile_email(self) -> str:
         """Return the address of the authorized mailbox."""
         profile = _with_retry(lambda: self._service.users().getProfile(userId="me"), "could not read Gmail profile")
         return profile.get("emailAddress", "")
+
+    def _own_address(self) -> str:
+        """The authorized mailbox address, fetched once and kept."""
+        if self._own is None:
+            self._own = self.profile_email().lower()
+        return self._own
 
     def create_draft(self, message, *, to: str, subject: str) -> DraftRef:
         """Create one draft and return its identifiers."""
@@ -196,6 +229,64 @@ class GmailDraftService:
         :returns: messages in metadata format, empty when none are scheduled
         """
         return self.search_sent(SCHEDULED_SEARCH_QUERY, limit=limit)
+
+    def list_reply_senders(self, *, limit: int = 500) -> tuple[set[str], set[str]]:
+        """Return who answered, and whose address bounced.
+
+        A reply lands in the same thread as the message it answers, so inbound mail on
+        a sent thread is an answer. A delivery failure lands in that thread too, which
+        is why bounce senders are separated out rather than counted as replies. Only
+        the From header is read, never a body.
+
+        :param limit: how many threads to inspect
+        :returns: addresses that replied, and addresses of threads that bounced
+        """
+        listing = _with_retry(
+            lambda: self._service.users().threads().list(userId="me", q=REPLY_SEARCH_QUERY, maxResults=limit),
+            "could not search for replies",
+        )
+        senders: set[str] = set()
+        bounced: set[str] = set()
+        for thread in listing.get("threads") or []:
+            thread_id = thread.get("id")
+            if not thread_id:
+                continue
+            detail = _with_retry(
+                lambda thread_id=thread_id: (
+                    self._service.users()
+                    .threads()
+                    .get(userId="me", id=thread_id, format="metadata", metadataHeaders=["From", "To"])
+                ),
+                f"could not read thread {thread_id}",
+            )
+            messages = detail.get("messages") or []
+            inbound = []
+            for message in messages:
+                # A message this mailbox sent carries SENT, so anything without it in a
+                # sent thread came from elsewhere.
+                if "SENT" in (message.get("labelIds") or []):
+                    continue
+                inbound.append(_bare_address(_header_value(message, "From")))
+
+            if any(is_bounce_sender(address) for address in inbound):
+                # The bounce report names the failed address in its body, which is not
+                # read here, so the recipient of the outgoing message is used instead.
+                # A thread addressed to the mailbox itself, or to several people, gives
+                # no single answer, so those are left out rather than guessed at.
+                recipients = {
+                    _bare_address(_header_value(message, "To"))
+                    for message in messages
+                    if "SENT" in (message.get("labelIds") or [])
+                }
+                recipients.discard("")
+                recipients.discard(self._own_address())
+                if len(recipients) == 1:
+                    bounced.update(recipients)
+            senders.update(address for address in inbound if not is_bounce_sender(address))
+
+        senders.discard("")
+        bounced.discard("")
+        return senders, bounced
 
     def search_sent(self, query: str, *, limit: int = 20) -> list[dict]:
         """Search the mailbox and return message headers for the matches.

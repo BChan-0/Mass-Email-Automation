@@ -62,14 +62,15 @@ def test_a_row_is_filled_from_the_csv_and_the_mailbox(paths):
     row = build_rows([make_contact()], states=states, saved=saved, default_assignee="Bonnie")[0]
 
     assert row.client == "Google"
-    assert row.status == "Scheduled to send"
+    assert row.status == "Scheduled"
     assert row.name == "Ada Lovelace"
     assert row.title == "VP of Engineering"
     assert row.linkedin == "https://linkedin.com/in/ada"
     assert row.re_emailed == "No"
     assert row.assignee == "Bonnie"
     assert row.notes == ""
-    assert row.last_contact == "2026-08-05"
+    # The sheet writes dates as M/D/YYYY, not ISO.
+    assert row.last_contact == "8/5/2026"
 
 
 def test_notes_is_the_only_column_left_blank_once_an_assignee_is_given(paths):
