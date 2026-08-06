@@ -4,7 +4,13 @@ Covers everything that does not need Gmail credentials: uploads, preview,
 settings, and the error paths. Draft creation is checked by the pytest suite,
 which stubs Gmail.
 
-Usage: python tools/smoke_test.py [base-url]
+Endpoints that save values are skipped unless ``--allow-writes`` is given, because
+a smoke test run against the everyday server would otherwise leave invented notes
+and assignees sitting in real tracking data.
+
+Usage:
+    python tools/smoke_test.py [base-url]
+    python tools/smoke_test.py http://127.0.0.1:5099 --allow-writes
 """
 
 from __future__ import annotations
@@ -18,7 +24,9 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:5000"
+ARGUMENTS = [item for item in sys.argv[1:] if not item.startswith("-")]
+BASE = ARGUMENTS[0] if ARGUMENTS else "http://127.0.0.1:5000"
+WRITE_SAFE = "--allow-writes" in sys.argv
 SAMPLE_CSV = Path(__file__).resolve().parent.parent / "samples" / "contacts-sample.csv"
 
 # Flask's session cookie has to be carried across requests so the server can
@@ -147,6 +155,19 @@ def main() -> int:
     check("suppression list readable", code == 200 and "entries" in payload)
     code, payload = post_json("/api/suppression", {})
     check("suppression rejects an empty request", code == 400)
+
+    # Endpoints that write saved values are only exercised against a throwaway
+    # server. Run one with --root /tmp/somewhere to include them, otherwise a smoke
+    # test would leave invented notes and assignees in real data.
+    if WRITE_SAFE:
+        print("saved values (throwaway server)")
+        code, payload = post_json(
+            "/api/tracker/save",
+            {"entries": [{"email": "smoke-test@example.invalid", "notes": "smoke test"}]},
+        )
+        check("tracker values can be saved", code == 200 and payload.get("saved") == 1)
+    else:
+        print("skipping write tests: pass --allow-writes for a throwaway server")
 
     print("guards")
     code, payload = post_json("/api/create-drafts", {"csv_id": csv_id, "subject_template": "  ", "body_template": "b"})

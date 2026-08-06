@@ -742,6 +742,34 @@ def create_app(paths: Paths | None = None) -> Flask:
             }
         )
 
+    @app.get("/api/tracker/saved")
+    def list_tracker_fields():
+        """Show every remembered value, so it is clear what is stored."""
+        entries = tracker.all_entries()
+        return jsonify(
+            {
+                "ok": True,
+                "path": str(resolved.tracker_file),
+                "count": len(entries),
+                "entries": [{"email": email, **values} for email, values in sorted(entries.items())],
+            }
+        )
+
+    @app.post("/api/tracker/forget")
+    def forget_tracker_fields():
+        """Clear remembered values, for named addresses or all of them."""
+        payload = request.get_json(silent=True) or {}
+        emails = payload.get("emails")
+        if payload.get("all"):
+            removed = tracker.forget_all()
+        elif isinstance(emails, list) and emails:
+            removed = tracker.forget([str(item) for item in emails])
+        else:
+            return jsonify({"ok": False, "error": "Give addresses to clear, or all."}), 400
+
+        tracker.save()
+        return jsonify({"ok": True, "removed": removed, "remaining": tracker.count()})
+
     @app.post("/api/tracker/save")
     def save_tracker_fields():
         """Remember the spreadsheet values typed for one or more contacts."""

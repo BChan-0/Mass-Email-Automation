@@ -160,6 +160,28 @@ class TrackerFields:
     def count(self) -> int:
         return len(self._entries)
 
+    def all_entries(self) -> dict[str, dict[str, str]]:
+        """Every remembered value, so the UI can show what is stored."""
+        return {email: dict(values) for email, values in self._entries.items()}
+
+    def forget(self, emails: list[str]) -> int:
+        """Drop remembered values for the given addresses.
+
+        :param emails: addresses to clear
+        :returns: how many entries were removed
+        """
+        removed = 0
+        for email in emails:
+            if self._entries.pop(normalize_address(email), None) is not None:
+                removed += 1
+        return removed
+
+    def forget_all(self) -> int:
+        """Drop every remembered value."""
+        removed = len(self._entries)
+        self._entries.clear()
+        return removed
+
 
 @dataclass
 class MessageState:

@@ -474,6 +474,54 @@ def test_tracker_save_rejects_an_empty_request(client):
     assert client.post("/api/tracker/save", json={}).status_code == 400
 
 
+def test_remembered_values_can_be_listed(client):
+    client.post(
+        "/api/tracker/save",
+        json={"entries": [{"email": "ada@engines.example", "notes": "spoke at conference"}]},
+    )
+
+    payload = client.get("/api/tracker/saved").get_json()
+
+    assert payload["count"] == 1
+    assert payload["entries"][0]["email"] == "ada@engines.example"
+    assert payload["entries"][0]["notes"] == "spoke at conference"
+
+
+def test_a_remembered_value_can_be_forgotten(client, connected, apollo_csv):
+    csv_id = upload(client, apollo_csv).get_json()["csv_id"]
+    client.post(
+        "/api/tracker/save",
+        json={"entries": [{"email": "ada@engines.example", "notes": "wrong note"}]},
+    )
+
+    forgotten = client.post("/api/tracker/forget", json={"emails": ["Ada@Engines.Example"]}).get_json()
+
+    assert forgotten["removed"] == 1
+    rows = client.post("/api/tracker", json={"csv_id": csv_id}).get_json()["rows"]
+    assert all(row["notes"] == "" for row in rows)
+
+
+def test_every_remembered_value_can_be_cleared(client):
+    client.post(
+        "/api/tracker/save",
+        json={
+            "entries": [
+                {"email": "ada@engines.example", "notes": "one"},
+                {"email": "grace@compilers.example", "notes": "two"},
+            ]
+        },
+    )
+
+    cleared = client.post("/api/tracker/forget", json={"all": True}).get_json()
+
+    assert cleared["removed"] == 2
+    assert client.get("/api/tracker/saved").get_json()["count"] == 0
+
+
+def test_forget_needs_something_to_forget(client):
+    assert client.post("/api/tracker/forget", json={}).status_code == 400
+
+
 def test_tracker_needs_a_csv_and_a_connection(client, apollo_csv):
     assert client.post("/api/tracker", json={}).status_code == 400
     csv_id = upload(client, apollo_csv).get_json()["csv_id"]

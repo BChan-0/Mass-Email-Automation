@@ -1106,6 +1106,68 @@ async function saveSheetFields() {
   }
 }
 
+// Shows what the app has saved per contact, so a stored value is never a surprise.
+async function loadRemembered() {
+  const area = el("remembered-area");
+  try {
+    const result = await api("/api/tracker/saved");
+    area.textContent = "";
+    el("remembered-summary").textContent = result.count
+      ? `${result.count} contact(s) have saved values in ${result.path}`
+      : "Nothing saved yet";
+
+    if (!result.count) {
+      area.classList.remove("hidden");
+      return;
+    }
+
+    const table = document.createElement("table");
+    const head = table.createTHead().insertRow();
+    ["Address", "Saved values", ""].forEach((title) => {
+      const cell = document.createElement("th");
+      cell.textContent = title;
+      cell.style.textAlign = "left";
+      head.appendChild(cell);
+    });
+    const body = table.createTBody();
+    result.entries.forEach((entry) => {
+      const row = body.insertRow();
+      row.insertCell().textContent = entry.email;
+      const summary = Object.entries(entry)
+        .filter(([key, value]) => key !== "email" && value)
+        .map(([key, value]) => `${key}: ${value}`)
+        .join("; ");
+      row.insertCell().textContent = summary || "(empty)";
+      const clear = document.createElement("button");
+      clear.type = "button";
+      clear.className = "btn btn-quiet btn-small btn-danger";
+      clear.textContent = "Forget";
+      clear.addEventListener("click", async () => {
+        await postJson("/api/tracker/forget", { emails: [entry.email] });
+        toast(`Forgot saved values for ${entry.email}`);
+        await loadRemembered();
+      });
+      row.insertCell().appendChild(clear);
+    });
+    area.appendChild(table);
+
+    const clearAll = document.createElement("button");
+    clearAll.type = "button";
+    clearAll.className = "btn btn-small btn-danger";
+    clearAll.textContent = `Forget all ${result.count}`;
+    clearAll.addEventListener("click", async () => {
+      if (!confirm(`Forget saved values for all ${result.count} contact(s)?`)) return;
+      await postJson("/api/tracker/forget", { all: true });
+      toast("All saved values forgotten");
+      await loadRemembered();
+    });
+    area.appendChild(clearAll);
+    area.classList.remove("hidden");
+  } catch (error) {
+    el("remembered-summary").textContent = error.message;
+  }
+}
+
 async function copySheet() {
   const text = el("sheet-tsv").value;
   if (!text.trim()) {
@@ -1202,6 +1264,14 @@ function wire() {
   el("build-sheet").addEventListener("click", buildSheet);
   el("save-sheet").addEventListener("click", saveSheetFields);
   el("copy-sheet").addEventListener("click", copySheet);
+  el("show-remembered").addEventListener("click", () => {
+    const area = el("remembered-area");
+    if (area.classList.contains("hidden")) {
+      loadRemembered();
+    } else {
+      area.classList.add("hidden");
+    }
+  });
 }
 
 wire();

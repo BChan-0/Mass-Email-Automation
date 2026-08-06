@@ -295,6 +295,10 @@ Client, Status, LinkedIn, Re-Emailed, Assignee, and Notes can be typed over in t
 table. `Remember my entries` saves them against the contact's address, and they
 come back the next time that address appears in any list, in `data/tracker.json`.
 
+`Show remembered values` lists everything saved this way, with the file it lives in,
+so a value in a row is never a mystery. Forget one address, or all of them, from
+there.
+
 `Copy for Sheets` puts the rows on the clipboard as tab separated text. In Google
 Sheets, click the first cell and paste; each value lands in its own column with no
 import step. The text box below holds the same thing in case the browser blocks
@@ -425,12 +429,16 @@ secret and access token; `data/` holds uploaded contacts and batch records. Chec
 Tests use a Gmail stub in `tests/conftest.py` and never reach the network.
 
 `tools/smoke_test.py` checks a running server over HTTP, covering everything that
-does not need Gmail credentials:
+does not need Gmail credentials. Point it at a throwaway data directory rather than
+your everyday one, so nothing it writes lands in real tracking data:
 
 ```bash
-.venv/bin/python -m app.web --port 5099 &
-.venv/bin/python tools/smoke_test.py http://127.0.0.1:5099
+.venv/bin/python -m app.web --port 5099 --root /tmp/gdb-scratch &
+.venv/bin/python tools/smoke_test.py http://127.0.0.1:5099 --allow-writes
 ```
+
+Without `--allow-writes` the endpoints that save values are skipped, which is what
+you want when checking the server you actually use.
 
 | Module | Purpose |
 |---|---|
