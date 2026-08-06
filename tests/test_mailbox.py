@@ -14,6 +14,7 @@ from app.mailbox import (
     to_iso_date,
     to_sheet_date,
 )
+from app.tracker import STATUS_CHOICES
 
 
 def test_scheduled_messages_are_read_with_their_send_time(gmail):
@@ -148,8 +149,18 @@ def test_sheet_dates_drop_leading_zeros(raw, expected):
     assert to_sheet_date(raw) == expected
 
 
+def test_every_sheet_status_is_a_real_dropdown_entry():
+    # Sheets only draws its coloured chip when the text matches the dropdown exactly,
+    # so a wording the sheet does not define would paste as a plain cell.
+    for status, wording in SHEET_STATUS.items():
+        assert wording in STATUS_CHOICES, status
+
+
 def test_the_sheet_status_wording_matches_the_dropdown():
     assert SHEET_STATUS["sent"] == "Reached Out"
     assert SHEET_STATUS["replied"] == "Replied"
-    # A deleted draft reached nobody, so it leaves the cell empty.
-    assert SHEET_STATUS["deleted"] == ""
+    assert SHEET_STATUS["scheduled"] == "Scheduled Email"
+    assert SHEET_STATUS["bounced"] == "email failed :("
+    # Nothing reached the person, so the sheet's own wording for that is used.
+    assert SHEET_STATUS["draft"] == "Not Reached Out"
+    assert SHEET_STATUS["deleted"] == "Not Reached Out"

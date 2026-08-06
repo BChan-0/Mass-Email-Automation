@@ -39,12 +39,14 @@ STATUS_LABELS = {
 # wording the status view shows. A draft or a scheduled send has not reached anyone,
 # so neither is Reached Out yet.
 SHEET_STATUS = {
-    STATUS_DRAFT: "Drafted",
-    STATUS_SCHEDULED: "Scheduled",
+    # A draft has not been scheduled or sent, so the sheet's own wording for someone
+    # still untouched is the honest cell. There is no dropdown entry for a draft.
+    STATUS_DRAFT: "Not Reached Out",
+    STATUS_SCHEDULED: "Scheduled Email",
     STATUS_SENT: "Reached Out",
     STATUS_REPLIED: "Replied",
     STATUS_BOUNCED: "email failed :(",
-    STATUS_DELETED: "",
+    STATUS_DELETED: "Not Reached Out",
 }
 
 # Order used when one address has more than one message, most committed first. A reply

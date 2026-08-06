@@ -52,6 +52,7 @@ from .message import Attachment
 from .store import BatchStore, load_settings, save_settings
 from .templating import KNOWN_FIELDS, find_placeholders
 from .tracker import (
+    ASSIGNEE_CHOICES,
     COLUMNS,
     RE_EMAILED_CHOICES,
     STATUS_CHOICES,
@@ -774,6 +775,7 @@ def create_app(paths: Paths | None = None) -> Flask:
                 "tsv": to_tsv(rows, include_header=bool(payload.get("include_header", False))),
                 "status_choices": list(STATUS_CHOICES),
                 "re_emailed_choices": list(RE_EMAILED_CHOICES),
+                "assignee_choices": list(ASSIGNEE_CHOICES),
                 "errors": [item for item in (scheduled_error, reply_error) if item],
             }
         )

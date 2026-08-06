@@ -62,7 +62,7 @@ def test_a_row_is_filled_from_the_csv_and_the_mailbox(paths):
     row = build_rows([make_contact()], states=states, saved=saved, default_assignee="Bonnie")[0]
 
     assert row.client == "Google"
-    assert row.status == "Scheduled"
+    assert row.status == "Scheduled Email"
     assert row.name == "Ada Lovelace"
     assert row.title == "VP of Engineering"
     assert row.linkedin == "https://linkedin.com/in/ada"

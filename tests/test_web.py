@@ -8,7 +8,7 @@ import pytest
 
 from app import web
 from app.store import BatchStore
-from app.tracker import COLUMNS
+from app.tracker import COLUMNS, STATUS_CHOICES
 
 from .conftest import FakeGmail
 
@@ -560,7 +560,7 @@ def test_tracker_uses_the_scheduled_state_and_client_from_the_subject(client, co
     rows = client.post("/api/tracker", json={"csv_id": csv_id}).get_json()["rows"]
     ada = next(row for row in rows if row["email"] == "ada@engines.example")
 
-    assert ada["status"] == "Scheduled"
+    assert ada["status"] == "Scheduled Email"
     assert ada["client"] == "Google"
     assert ada["last_contact"] == "8/5/2026"
 
@@ -570,9 +570,12 @@ def test_tracker_offers_the_dropdown_choices(client, connected, apollo_csv):
 
     payload = client.post("/api/tracker", json={"csv_id": csv_id}).get_json()
 
-    assert "Reached Out" in payload["status_choices"]
+    # Copied from the sheet, so the punctuation and casing are load bearing.
+    assert payload["status_choices"] == list(STATUS_CHOICES)
     assert "email failed :(" in payload["status_choices"]
-    assert payload["re_emailed_choices"] == ["No", "Yes"]
+    assert "Scheduled Meeting 1" in payload["status_choices"]
+    assert payload["re_emailed_choices"] == ["Yes", "No", "I'm Scared"]
+    assert "Bonnie." in payload["assignee_choices"]
 
 
 def test_tracker_rows_carry_no_header_line(client, connected, apollo_csv):

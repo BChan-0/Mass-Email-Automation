@@ -265,13 +265,14 @@ Saved lists live under `data/library/`, capped at the 50 most recently used.
 The status tab lists every address this app has drafted to, with what happened to
 the message.
 
-| Status | Meaning |
-|---|---|
-| Draft | Sitting in Gmail, no send time set |
-| Scheduled to send | Gmail is holding it for a later time |
-| Sent | In sent mail, no answer yet |
-| Replied | The contact wrote back |
-| Deleted | Created and then deleted, and no longer in Gmail |
+| Status | Meaning | Sheet wording |
+|---|---|---|
+| Draft | Sitting in Gmail, no send time set | Not Reached Out |
+| Scheduled to send | Gmail is holding it for a later time | Scheduled Email |
+| Sent | In sent mail, no answer yet | Reached Out |
+| Replied | The contact wrote back | Replied |
+| Delivery failed | The address bounced | `email failed :(` |
+| Deleted | Created and then deleted, and no longer in Gmail | Not Reached Out |
 
 A reply is found by looking for a sent thread that also holds inbound mail, since
 Gmail keeps a reply in the thread it answers. Only the From header of each message is
@@ -313,9 +314,17 @@ left blank for you.
 A contact with no value for a column gets an empty cell rather than being left out,
 so the columns stay aligned when pasted.
 
-Status and Re-Emailed are dropdowns in the sheet, so they are dropdowns here, with
-the same choices including ones the app cannot work out such as `email failed :(`.
-Client, LinkedIn, Assignee, and Notes are free text. `Remember my entries` saves them
+Status, Re-Emailed, and HPL Assignee are dropdowns in the sheet, so they are dropdowns
+here, holding the sheet's own entries. They are copied character for character,
+including `im scared` in Status against `I'm Scared` in Re-Emailed, because Sheets
+only draws its coloured chip when the pasted text matches the entry exactly. A test
+checks that every status the app writes is one the sheet defines. Client, LinkedIn,
+and Notes are free text.
+
+Statuses the app can work out are Reached Out, Replied, Scheduled Email,
+`email failed :(`, and Not Reached Out. The rest of the list, such as
+`Scheduled Meeting 1` or `Signed`, describes a stage only you know about, so pick
+those from the dropdown. `Remember my entries` saves them
 against the contact's address, and they come back the next time that address appears
 in any list, in `data/tracker.json`.
 

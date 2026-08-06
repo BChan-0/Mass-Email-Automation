@@ -14,7 +14,7 @@ const state = {
   statusRows: [],
   statusFilter: "all",
   sheetRows: [],
-  sheetChoices: { status: [], re_emailed: [] },
+  sheetChoices: { status: [], re_emailed: [], assignee: [] },
 };
 
 const el = (id) => document.getElementById(id);
@@ -1080,7 +1080,17 @@ async function buildSheet() {
     state.sheetChoices = {
       status: result.status_choices || [],
       re_emailed: result.re_emailed_choices || [],
+      assignee: result.assignee_choices || [],
     };
+    // The default assignee offers the same names, so a typo cannot produce a value the
+    // sheet will not render as a chip.
+    const options = el("assignee-options");
+    options.textContent = "";
+    state.sheetChoices.assignee.forEach((name) => {
+      const option = document.createElement("option");
+      option.value = name;
+      options.appendChild(option);
+    });
     renderSheet(result.columns, result.rows);
     el("sheet-status").textContent = `${result.rows.length} row(s)`;
     el("sheet-status").className = "hint";
@@ -1108,7 +1118,7 @@ const SHEET_ORDER = [
 ];
 
 // Columns the sheet defines as dropdowns, so a typed value cannot fall outside them.
-const SHEET_DROPDOWNS = { status: "status", re_emailed: "re_emailed" };
+const SHEET_DROPDOWNS = { status: "status", re_emailed: "re_emailed", assignee: "assignee" };
 
 function columnLetter(index) {
   let letter = "";

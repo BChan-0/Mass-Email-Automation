@@ -35,21 +35,35 @@ COLUMNS = (
     "Date of most recent contact",
 )
 
-# Values the sheet's dropdown columns accept, offered in the UI so a pasted row does
-# not land outside the dropdown. Status carries entries the app cannot derive, such as
-# a bounce, which is why it is a superset of SHEET_STATUS.
+# Values the sheet's dropdown columns accept, in the order the sheet lists them.
+# Copied exactly, including casing and punctuation, because Sheets only renders its
+# coloured chip when the pasted text matches the dropdown entry character for
+# character. Most of these describe a stage the app cannot work out on its own.
 STATUS_CHOICES = (
     "Reached Out",
+    "Not Reached Out",
+    "Scheduled Meeting 1",
+    "Scheduled Meeting 2",
+    "Signed",
+    "im scared",
+    "Scheduled Email",
+    "Dead",
     "Replied",
-    "Drafted",
-    "Scheduled",
     "email failed :(",
-    "Meeting Booked",
-    "Not Interested",
-    "No Response",
+    "Drafting Paperwork",
 )
 
-RE_EMAILED_CHOICES = ("No", "Yes")
+# Note the different spelling from the Status entry "im scared". Both are as the sheet
+# has them, so neither is normalized.
+RE_EMAILED_CHOICES = ("Yes", "No", "I'm Scared")
+
+ASSIGNEE_CHOICES = (
+    'Holden "Boss" Schermer',
+    'Natanya "I completely forgot I\'m ur boss" Tan',
+    "THE STEVEN WEI",
+    "Bonnie.",
+    "Free",
+)
 
 # Subject lines follow "[Harvard Product Lab x CLIENT] ...", so the client name can
 # be read back out of a message that was already created.
