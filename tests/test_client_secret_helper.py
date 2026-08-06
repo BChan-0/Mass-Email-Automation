@@ -10,8 +10,8 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.config import GMAIL_SCOPES  # noqa: E402
-from tools.write_client_secret import build_config, main  # noqa: E402
+from app.config import GMAIL_SCOPES
+from tools.write_client_secret import build_config, main
 
 CLIENT_ID = "1234567890-abcdef.apps.googleusercontent.com"
 CLIENT_SECRET = "GOCSPX-test_secret_value"
@@ -54,7 +54,7 @@ def test_refuses_to_overwrite_without_force(tmp_path, monkeypatch):
 
     assert main_with(arguments, monkeypatch) == 0
     assert main_with(arguments, monkeypatch) == 1
-    assert main_with(arguments + ["--force"], monkeypatch) == 0
+    assert main_with([*arguments, "--force"], monkeypatch) == 0
 
 
 def test_rejects_a_value_that_is_not_a_client_id(tmp_path, monkeypatch):

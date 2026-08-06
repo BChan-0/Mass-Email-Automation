@@ -6,6 +6,7 @@ use the connected Gmail account.
 
 from __future__ import annotations
 
+import argparse
 import secrets
 from pathlib import Path
 
@@ -845,8 +846,6 @@ def create_app(paths: Paths | None = None) -> Flask:
 
 def main() -> None:
     """Entry point for ``python -m app.web``."""
-    import argparse
-
     parser = argparse.ArgumentParser(description="Run the Gmail draft builder UI.")
     parser.add_argument("--host", default="127.0.0.1", help="interface to bind (default 127.0.0.1)")
     parser.add_argument("--port", type=int, default=5000, help="port to listen on (default 5000)")

@@ -206,24 +206,18 @@ class GmailDraftService:
         )
         identifiers = [item.get("id") for item in listing.get("messages") or [] if item.get("id")]
 
-        messages = []
-        for message_id in identifiers:
-            messages.append(
-                _with_retry(
-                    lambda message_id=message_id: (
-                        self._service.users()
-                        .messages()
-                        .get(
-                            userId="me",
-                            id=message_id,
-                            format="metadata",
-                            metadataHeaders=METADATA_HEADERS,
-                        )
-                    ),
-                    f"could not read message {message_id}",
-                )
-            )
-        return messages
+        return [self._message_metadata(message_id) for message_id in identifiers]
+
+    def _message_metadata(self, message_id: str) -> dict:
+        """Fetch one message's headers, without its body."""
+        return _with_retry(
+            lambda: (
+                self._service.users()
+                .messages()
+                .get(userId="me", id=message_id, format="metadata", metadataHeaders=METADATA_HEADERS)
+            ),
+            f"could not read message {message_id}",
+        )
 
     def delete_draft(self, draft_id: str) -> None:
         """Delete one draft. Already deleted drafts are treated as success."""

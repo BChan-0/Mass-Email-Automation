@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -10,7 +11,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from tools.install_client_secret import describe_problem, main  # noqa: E402
+from tools.install_client_secret import describe_problem, main
 
 DESKTOP_CLIENT = {
     "installed": {
@@ -102,9 +103,7 @@ def test_autodiscovery_picks_the_newest_usable_file(tmp_path, monkeypatch):
     write(downloads / "client_secret_old.json", DESKTOP_CLIENT)
     write(downloads / "client_secret_bad.json", {"client_secret": "only"})
     newer = write(downloads / "client_secret_new.json", DESKTOP_CLIENT)
-    # Make the ordering explicit rather than relying on write speed.
-    import os
-
+    # Set the time rather than relying on write speed to order the files.
     os.utime(newer, (2_000_000_000, 2_000_000_000))
 
     monkeypatch.setenv("GDB_ROOT", str(tmp_path))

@@ -18,7 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.config import paths_from_env  # noqa: E402
+from app.config import paths_from_env
 
 SEARCH_DIRECTORIES = (Path.home() / "Downloads", Path.home() / "Desktop", Path.home())
 FILENAME_PATTERNS = ("client_secret*.json", "*googleusercontent*.json", "credentials*.json")

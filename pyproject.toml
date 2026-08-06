@@ -24,8 +24,29 @@ line-length = 120
 target-version = "py310"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
+select = [
+    "E",
+    "F",
+    "W",
+    "I",
+    "UP",
+    "B",
+    "C4",
+    "SIM",
+    "RUF",     # ruff's own checks, including stale noqa directives
+    "PLC0415", # imports belong at the top of a file
+    "PERF",    # avoidable loops and copies
+    "RET",     # redundant branches around a return
+    "PIE",     # small redundancies
+    "TID",     # tidy imports
+]
+ignore = [
+    # Several loops catch per item so one bad file or request cannot end the loop.
+    # That is the intent, not an oversight.
+    "PERF203",
+]
 
 [tool.ruff.lint.per-file-ignores]
-# Tests import the app after adjusting sys.path, and repeat long literal setups.
+# Tests and tools import the app after adjusting sys.path.
 "tests/*" = ["E402"]
+"tools/*" = ["E402"]

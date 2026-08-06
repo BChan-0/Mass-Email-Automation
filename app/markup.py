@@ -11,6 +11,8 @@ crafted cell could otherwise inject script into the preview page or the message.
 
 from __future__ import annotations
 
+import re
+
 import bleach
 import markdown
 
@@ -46,6 +48,21 @@ ALLOWED_TAGS = frozenset(
 ALLOWED_ATTRIBUTES = {"a": ["href", "title"]}
 ALLOWED_PROTOCOLS = ["http", "https", "mailto"]
 
+# Syntax that means a body was written as Markdown: bold, italic, bullet list,
+# numbered list, link, heading, quote.
+MARKDOWN_SYNTAX = tuple(
+    re.compile(pattern, re.MULTILINE)
+    for pattern in (
+        r"\*\*[^*\n]+\*\*",
+        r"(?<![\w*])\*[^*\n]+\*(?![\w*])",
+        r"^\s*[-*+]\s+\S",
+        r"^\s*\d+\.\s+\S",
+        r"\[[^\]\n]+\]\([^)\n]+\)",
+        r"^\s*#{1,3}\s+\S",
+        r"^\s*>\s+\S",
+    )
+)
+
 
 def render_markdown(text: str) -> str:
     """Convert Markdown to sanitized HTML.
@@ -74,15 +91,4 @@ def looks_like_markdown(text: str) -> bool:
     :param text: message body to inspect
     :returns: True when common Markdown syntax is present
     """
-    import re
-
-    patterns = (
-        r"\*\*[^*\n]+\*\*",  # bold
-        r"(?<![\w*])\*[^*\n]+\*(?![\w*])",  # italic
-        r"^\s*[-*+]\s+\S",  # bullet list
-        r"^\s*\d+\.\s+\S",  # numbered list
-        r"\[[^\]\n]+\]\([^)\n]+\)",  # link
-        r"^\s*#{1,3}\s+\S",  # heading
-        r"^\s*>\s+\S",  # quote
-    )
-    return any(re.search(pattern, text or "", re.MULTILINE) for pattern in patterns)
+    return any(pattern.search(text or "") for pattern in MARKDOWN_SYNTAX)

@@ -30,5 +30,16 @@ jobs:
       - name: Check formatting
         run: ruff format --check .
 
+      - name: Check whitespace
+        run: |
+          if git grep -nI ' $' -- .; then
+            echo "Trailing whitespace found."
+            exit 1
+          fi
+          if git ls-files --eol | grep -v 'w/lf' | grep -v 'w/none'; then
+            echo "Line endings other than LF found."
+            exit 1
+          fi
+
       - name: Test
         run: pytest

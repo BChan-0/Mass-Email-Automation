@@ -6,6 +6,7 @@ import base64
 import mimetypes
 from dataclasses import dataclass
 from email.message import EmailMessage
+from html import escape
 from pathlib import Path
 
 from .markup import render_markdown
@@ -52,8 +53,6 @@ def body_to_html(body: str, *, as_markdown: bool = False) -> str:
     """
     if as_markdown:
         return render_markdown(body) or "<p></p>"
-
-    from html import escape
 
     paragraphs = [block.strip() for block in (body or "").replace("\r\n", "\n").split("\n\n")]
     rendered = ["<p>" + escape(block).replace("\n", "<br>") + "</p>" for block in paragraphs if block]

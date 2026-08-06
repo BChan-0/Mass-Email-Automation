@@ -10,9 +10,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.config import Paths  # noqa: E402
-from app.gmail_client import DraftRef, GmailError  # noqa: E402
-from app.store import BatchStore  # noqa: E402
+from app.config import Paths
+from app.gmail_client import DraftRef, GmailError
+from app.store import BatchStore
 
 
 @dataclass
@@ -76,21 +76,19 @@ class FakeGmail:
         if address in self.search_failures:
             raise GmailError(f"could not search sent mail: stubbed failure for {address}")
 
-        messages = []
-        for date in self.sent_to.get(address, []):
-            messages.append(
-                {
-                    "id": f"msg-{address}-{date}",
-                    "internalDate": "0",
-                    "payload": {
-                        "headers": [
-                            {"name": "To", "value": address},
-                            {"name": "Date", "value": date},
-                        ]
-                    },
-                }
-            )
-        return messages
+        return [
+            {
+                "id": f"msg-{address}-{date}",
+                "internalDate": "0",
+                "payload": {
+                    "headers": [
+                        {"name": "To", "value": address},
+                        {"name": "Date", "value": date},
+                    ]
+                },
+            }
+            for date in self.sent_to.get(address, [])
+        ]
 
     def create_draft(self, message, *, to: str, subject: str) -> DraftRef:
         if to in self.fail_on:
