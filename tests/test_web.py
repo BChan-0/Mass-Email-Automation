@@ -305,6 +305,181 @@ def test_markdown_reaches_the_created_draft(client, connected, apollo_csv):
     assert "<strong>" in raw or "strong" in raw
 
 
+def test_an_upload_is_remembered_in_the_library(client, apollo_csv):
+    payload = upload(client, apollo_csv).get_json()
+
+    assert payload["saved_list_id"]
+    listed = client.get("/api/library").get_json()
+    assert listed["lists"][0]["name"] == "apollo.csv"
+    assert listed["lists"][0]["row_count"] == 3
+
+
+def test_a_saved_list_reloads_with_its_edits_highlighted(client, apollo_csv):
+    first = upload(client, apollo_csv).get_json()
+    client.post(
+        "/api/contacts",
+        json={"csv_id": first["csv_id"], "edits": [{"index": 0, "title": "Countess"}], "remove": [2]},
+    )
+
+    reloaded = client.post(f"/api/library/{first['saved_list_id']}/load", json={}).get_json()
+
+    assert reloaded["contact_count"] == 2
+    assert reloaded["edited_rows"] == {"0": ["title"]}
+    contacts = client.get(f"/api/contacts?csv_id={reloaded['csv_id']}").get_json()["contacts"]
+    assert contacts[0]["title"] == "Countess"
+
+
+def test_re_uploading_the_same_file_brings_its_edits_back(client, apollo_csv):
+    first = upload(client, apollo_csv).get_json()
+    client.post("/api/contacts", json={"csv_id": first["csv_id"], "edits": [{"index": 0, "company": "Engines Ltd"}]})
+
+    again = upload(client, apollo_csv).get_json()
+
+    assert again["saved_list_id"] == first["saved_list_id"]
+    assert again["edited_rows"] == {"0": ["company"]}
+
+
+def test_forgetting_edits_restores_the_original_list(client, apollo_csv):
+    first = upload(client, apollo_csv).get_json()
+    client.post("/api/contacts", json={"csv_id": first["csv_id"], "remove": [0]})
+
+    client.post(f"/api/library/{first['saved_list_id']}/forget-edits", json={})
+    reloaded = client.post(f"/api/library/{first['saved_list_id']}/load", json={}).get_json()
+
+    assert reloaded["contact_count"] == 3
+    assert reloaded["edited_rows"] == {}
+
+
+def test_a_saved_list_can_be_deleted(client, apollo_csv):
+    first = upload(client, apollo_csv).get_json()
+
+    assert client.post(f"/api/library/{first['saved_list_id']}/delete", json={}).get_json()["ok"]
+    assert client.get("/api/library").get_json()["lists"] == []
+
+
+def test_unknown_saved_lists_return_404(client):
+    assert client.post("/api/library/nope/load", json={}).status_code == 404
+    assert client.post("/api/library/nope/delete", json={}).status_code == 404
+    assert client.post("/api/library/nope/forget-edits", json={}).status_code == 404
+
+
+def test_message_status_separates_scheduled_from_drafts(client, connected, apollo_csv):
+    csv_id = upload(client, apollo_csv).get_json()["csv_id"]
+    client.post("/api/create-drafts", json={"csv_id": csv_id, "subject_template": "Hi", "body_template": "B"})
+    connected.scheduled = [
+        {
+            "id": "s1",
+            "to": "someone.else@example.org",
+            "subject": "[Harvard Product Lab x Google] Fall 26",
+            "date": "Wed, 5 Aug 2026 17:00:00 -0700",
+        }
+    ]
+
+    payload = client.get("/api/message-status").get_json()
+
+    assert payload["counts"]["draft"] == 3
+    assert payload["counts"]["scheduled"] == 1
+    assert payload["scheduled_total"] == 1
+
+
+def test_message_status_reports_a_sent_message_rather_than_deleted(client, connected, apollo_csv):
+    csv_id = upload(client, apollo_csv).get_json()["csv_id"]
+    client.post("/api/create-drafts", json={"csv_id": csv_id, "subject_template": "Hi", "body_template": "B"})
+    # Sending removes the draft from Gmail and adds it to sent mail.
+    sent_id = next(iter(connected.drafts))
+    sent_address = connected.drafts[sent_id]["to"]
+    del connected.drafts[sent_id]
+    connected.sent_to[sent_address] = ["Tue, 4 Aug 2026 09:00:00 -0700"]
+
+    payload = client.get("/api/message-status").get_json()
+    row = next(item for item in payload["rows"] if item["email"] == sent_address)
+
+    assert row["status"] == "sent"
+    assert row["when"] == "2026-08-04"
+
+
+def test_message_status_needs_a_connection(client, apollo_csv):
+    assert client.get("/api/message-status").status_code == 401
+
+
+def test_a_scheduled_recipient_is_never_drafted_again(client, connected, apollo_csv):
+    connected.scheduled = [
+        {
+            "id": "s1",
+            "to": "grace@compilers.example",
+            "subject": "[Harvard Product Lab x Compilers] Fall 26",
+            "date": "Wed, 5 Aug 2026 17:00:00 -0700",
+        }
+    ]
+    csv_id = upload(client, apollo_csv).get_json()["csv_id"]
+
+    payload = client.post(
+        "/api/create-drafts", json={"csv_id": csv_id, "subject_template": "Hi", "body_template": "B"}
+    ).get_json()
+
+    assert payload["created"] == 2
+    assert payload["blocked"] == 1
+    blocked = payload["history_report"]["blocked"][0]
+    assert blocked["email"] == "grace@compilers.example"
+    assert blocked["source"] == "gmail_scheduled"
+
+
+def test_tracker_rows_cover_every_column(client, connected, apollo_csv):
+    csv_id = upload(client, apollo_csv).get_json()["csv_id"]
+
+    payload = client.post("/api/tracker", json={"csv_id": csv_id, "default_assignee": "Bonnie"}).get_json()
+
+    assert len(payload["columns"]) == 10
+    assert len(payload["rows"]) == 3
+    assert all(len(cells) == 10 for cells in payload["cells"])
+    header, *lines = payload["tsv"].split("\n")
+    assert header.split("\t") == payload["columns"]
+    assert len(lines) == 3
+
+
+def test_tracker_uses_the_scheduled_state_and_client_from_the_subject(client, connected, apollo_csv):
+    connected.scheduled = [
+        {
+            "id": "s1",
+            "to": "ada@engines.example",
+            "subject": "[Harvard Product Lab x Google] Fall 26",
+            "date": "Wed, 5 Aug 2026 17:00:00 -0700",
+        }
+    ]
+    csv_id = upload(client, apollo_csv).get_json()["csv_id"]
+
+    rows = client.post("/api/tracker", json={"csv_id": csv_id}).get_json()["rows"]
+    ada = next(row for row in rows if row["email"] == "ada@engines.example")
+
+    assert ada["status"] == "Scheduled to send"
+    assert ada["client"] == "Google"
+    assert ada["last_contact"] == "2026-08-05"
+
+
+def test_tracker_values_are_remembered_between_builds(client, connected, apollo_csv):
+    csv_id = upload(client, apollo_csv).get_json()["csv_id"]
+
+    client.post(
+        "/api/tracker/save",
+        json={"entries": [{"email": "ada@engines.example", "notes": "warm intro", "assignee": "Bonnie C"}]},
+    )
+    rows = client.post("/api/tracker", json={"csv_id": csv_id}).get_json()["rows"]
+    ada = next(row for row in rows if row["email"] == "ada@engines.example")
+
+    assert ada["notes"] == "warm intro"
+    assert ada["assignee"] == "Bonnie C"
+
+
+def test_tracker_save_rejects_an_empty_request(client):
+    assert client.post("/api/tracker/save", json={}).status_code == 400
+
+
+def test_tracker_needs_a_csv_and_a_connection(client, apollo_csv):
+    assert client.post("/api/tracker", json={}).status_code == 400
+    csv_id = upload(client, apollo_csv).get_json()["csv_id"]
+    assert client.post("/api/tracker", json={"csv_id": csv_id}).status_code == 401
+
+
 def test_attachment_is_staged_and_can_be_removed(client):
     staged = client.post(
         "/api/upload-attachment",

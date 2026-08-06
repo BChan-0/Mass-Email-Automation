@@ -16,7 +16,13 @@
   </div>
 </header>
 
-<main>
+<nav class="viewtabs" aria-label="Views">
+  <button id="view-compose" type="button" class="viewtab active" data-view="compose">Compose</button>
+  <button id="view-status" type="button" class="viewtab" data-view="status">Message status</button>
+  <button id="view-sheet" type="button" class="viewtab" data-view="sheet">Tracking sheet</button>
+</nav>
+
+<main id="pane-compose">
   <section class="card">
     <h2>1. Contacts</h2>
     <p class="hint">
@@ -30,6 +36,14 @@
         Choose CSV
       </label>
       <span id="csv-summary" class="hint">No file loaded</span>
+    </div>
+
+    <div id="library-panel">
+      <div class="row">
+        <button id="toggle-library" type="button" class="btn btn-quiet btn-small">Saved lists</button>
+        <span id="library-summary" class="hint"></span>
+      </div>
+      <ul id="library-list" class="list hidden"></ul>
     </div>
     <div id="csv-detail" class="detail hidden"></div>
 
@@ -185,6 +199,54 @@
       <button id="refresh-batches" type="button" class="btn btn-quiet">Refresh</button>
     </div>
     <div id="batch-area" class="batches"></div>
+  </section>
+</main>
+
+<main id="pane-status" class="hidden">
+  <section class="card">
+    <h2>Message status</h2>
+    <p class="hint">
+      Every address this app has drafted to, plus anything Gmail is holding to send
+      later. Scheduled messages are found even when another tool created them,
+      because Gmail keeps them out of the drafts list.
+    </p>
+    <div class="row">
+      <button id="refresh-status" type="button" class="btn btn-secondary">Refresh</button>
+      <label class="check" style="margin: 0">
+        <input id="status-check-sent" type="checkbox" checked>
+        <span>Check sent mail, needed to tell a sent message from a deleted one</span>
+      </label>
+    </div>
+    <div id="status-counts" class="row"></div>
+    <div id="status-area"></div>
+  </section>
+</main>
+
+<main id="pane-sheet" class="hidden">
+  <section class="card">
+    <h2>Tracking sheet</h2>
+    <p class="hint">
+      Rows for the outreach spreadsheet, built from the loaded CSV and the current
+      state of each message. Fill in what you want, then copy and paste into Google
+      Sheets. Everything except Notes is filled in where the app has a value.
+    </p>
+    <div class="row">
+      <label class="field" style="margin: 0; max-width: 220px">
+        <span>Default HPL Assignee</span>
+        <input id="sheet-assignee" type="text" placeholder="who is following up">
+      </label>
+      <button id="build-sheet" type="button" class="btn btn-secondary">Build rows</button>
+      <button id="save-sheet" type="button" class="btn btn-quiet">Remember my entries</button>
+      <button id="copy-sheet" type="button" class="btn btn-primary">Copy for Sheets</button>
+      <span id="sheet-status" class="hint"></span>
+    </div>
+    <div class="table-wrap">
+      <table id="sheet-table" class="grid"></table>
+    </div>
+    <label class="field">
+      <span>Tab separated text, in case copying does not work</span>
+      <textarea id="sheet-tsv" rows="6" readonly></textarea>
+    </label>
   </section>
 </main>
 

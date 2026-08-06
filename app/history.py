@@ -35,11 +35,13 @@ from .gmail_client import GmailError
 
 # Sources are ordered by how much weight they carry in the report.
 SOURCE_SENT_MAIL = "gmail_sent"
+SOURCE_SCHEDULED = "gmail_scheduled"
 SOURCE_PRIOR_BATCH = "prior_batch"
 SOURCE_SUPPRESSION = "suppression_list"
 
 SOURCE_LABELS = {
     SOURCE_SENT_MAIL: "already emailed from this account",
+    SOURCE_SCHEDULED: "a message to this address is scheduled to send",
     SOURCE_PRIOR_BATCH: "a draft to this address is still waiting in Gmail",
     SOURCE_SUPPRESSION: "on the do not contact list",
 }
@@ -322,10 +324,13 @@ class ContactGuard:
         history: HistoryIndex | None = None,
         suppression: dict[str, str] | None = None,
         sent_checker: SentMailChecker | None = None,
+        scheduled: dict[str, object] | None = None,
     ) -> None:
         self._history = history or HistoryIndex()
         self._suppression = suppression or {}
         self._sent = sent_checker
+        # Address to the scheduled message aimed at it, from app.mailbox.
+        self._scheduled = scheduled or {}
 
     @property
     def sent_errors(self) -> list[dict[str, str]]:
@@ -347,6 +352,18 @@ class ContactGuard:
                 email=email,
                 source=SOURCE_SUPPRESSION,
                 detail=self._suppression[key] or "listed in do-not-contact.txt",
+            )
+
+        # A scheduled message is about to go out, so it counts as contact even
+        # though nothing has been sent yet.
+        pending = self._scheduled.get(key)
+        if pending is not None:
+            return PriorContact(
+                email=email,
+                source=SOURCE_SCHEDULED,
+                first_contact=(getattr(pending, "send_at", "") or "")[:31],
+                message_count=1,
+                detail="Gmail is holding a message for this address to send later",
             )
 
         prior_batch = self._history.lookup(email)

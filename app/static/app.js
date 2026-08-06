@@ -8,6 +8,10 @@ const state = {
   contactCount: 0,
   connected: false,
   lastFocused: null,
+  // Row index to the field names that differ from the uploaded file.
+  editedRows: {},
+  statusLoaded: false,
+  sheetRows: [],
 };
 
 const el = (id) => document.getElementById(id);
@@ -193,6 +197,109 @@ function renderCsvDetail(result) {
   detail.classList.remove("hidden");
 }
 
+// Views
+
+const VIEWS = ["compose", "status", "sheet"];
+
+function showView(name) {
+  VIEWS.forEach((view) => {
+    el(`pane-${view}`).classList.toggle("hidden", view !== name);
+    el(`view-${view}`).classList.toggle("active", view === name);
+  });
+  if (name === "status" && !state.statusLoaded) loadStatus();
+}
+
+// Saved lists
+
+async function loadLibrary() {
+  try {
+    const result = await api("/api/library");
+    const list = el("library-list");
+    list.textContent = "";
+    el("library-summary").textContent = result.lists.length
+      ? `${result.lists.length} saved`
+      : "Nothing saved yet";
+
+    result.lists.forEach((entry) => {
+      const row = document.createElement("li");
+      const label = document.createElement("span");
+      const edited = entry.edited_count
+        ? `, ${entry.edited_count} edited row(s)`
+        : "";
+      const dropped = entry.removed_count ? `, ${entry.removed_count} removed` : "";
+      label.textContent = `${entry.name} (${entry.row_count} contacts${edited}${dropped}) last used ${entry.last_used_at.slice(0, 10)}`;
+      row.appendChild(label);
+
+      const actions = document.createElement("span");
+      const load = document.createElement("button");
+      load.type = "button";
+      load.className = "btn btn-secondary btn-small";
+      load.textContent = "Load";
+      load.addEventListener("click", () => loadSavedList(entry.list_id));
+      actions.appendChild(load);
+
+      if (entry.edited_count || entry.removed_count) {
+        const reset = document.createElement("button");
+        reset.type = "button";
+        reset.className = "btn btn-quiet btn-small";
+        reset.textContent = "Forget edits";
+        reset.addEventListener("click", async () => {
+          if (!confirm(`Forget the edits saved for ${entry.name}? The original file is kept.`)) return;
+          await postJson(`/api/library/${entry.list_id}/forget-edits`, {});
+          toast("Edits forgotten");
+          await loadLibrary();
+        });
+        actions.appendChild(reset);
+      }
+
+      const drop = document.createElement("button");
+      drop.type = "button";
+      drop.className = "btn btn-quiet btn-small btn-danger";
+      drop.textContent = "Delete";
+      drop.addEventListener("click", async () => {
+        if (!confirm(`Forget ${entry.name} entirely?`)) return;
+        await postJson(`/api/library/${entry.list_id}/delete`, {});
+        toast("Saved list removed");
+        await loadLibrary();
+      });
+      actions.appendChild(drop);
+
+      row.appendChild(actions);
+      list.appendChild(row);
+    });
+  } catch (error) {
+    el("library-summary").textContent = error.message;
+  }
+}
+
+async function loadSavedList(listId) {
+  try {
+    const result = await postJson(`/api/library/${listId}/load`, {});
+    state.csvId = result.csv_id;
+    state.filename = result.filename;
+    state.contactCount = result.contact_count;
+    state.editedRows = result.edited_rows || {};
+    el("csv-summary").textContent = `${result.filename}: ${result.contact_count} contacts`;
+    renderCsvDetail({ detected: result.detected, skipped: [] });
+    renderChips(
+      result.available_fields?.length
+        ? result.available_fields.concat("sender_name")
+        : defaultFields()
+    );
+    el("contacts-panel").classList.remove("hidden");
+    await loadContacts();
+    const edits = Object.keys(state.editedRows).length;
+    toast(
+      edits
+        ? `Loaded ${result.contact_count} contacts, ${edits} edited row(s) highlighted`
+        : `Loaded ${result.contact_count} contacts`
+    );
+    updateCreateButton();
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
 // Contact table
 
 const EMAIL_SHAPE = /^[^@\s,;<>]+@[^@\s,;<>]+\.[A-Za-z]{2,}$/;
@@ -240,6 +347,12 @@ function renderContactTable() {
       input.value = contact[field] || "";
       input.dataset.field = field;
       input.dataset.index = String(contact.index);
+      // Mark cells that differ from the uploaded file, so a reloaded list shows
+      // at a glance what was changed by hand.
+      if ((state.editedRows[String(contact.index)] || []).includes(field)) {
+        input.classList.add("edited");
+        input.title = "Edited, differs from the uploaded file";
+      }
       input.addEventListener("input", () => {
         if (field === "email") {
           input.classList.toggle("invalid", !EMAIL_SHAPE.test(input.value.trim()));
@@ -820,6 +933,195 @@ async function deleteFromBatch(batchId, draftIds, confirmMessage) {
   }
 }
 
+// Message status
+
+async function loadStatus() {
+  const area = el("status-area");
+  area.textContent = "Reading Gmail, this takes a moment on a large mailbox";
+  const checkSent = el("status-check-sent").checked ? "1" : "0";
+  try {
+    const result = await api(`/api/message-status?check_sent=${checkSent}`);
+    state.statusLoaded = true;
+
+    const counts = el("status-counts");
+    counts.textContent = "";
+    ["sent", "scheduled", "draft", "deleted"].forEach((key) => {
+      if (!result.counts[key]) return;
+      const chip = document.createElement("span");
+      chip.className = "count-chip";
+      chip.textContent = `${result.counts[key]} ${key}`;
+      counts.appendChild(chip);
+    });
+
+    area.textContent = "";
+    if (result.errors?.length) {
+      const warn = document.createElement("div");
+      warn.className = "error";
+      warn.textContent = result.errors.join("; ");
+      area.appendChild(warn);
+    }
+    if (!el("status-check-sent").checked) {
+      const note = document.createElement("div");
+      note.className = "warn";
+      note.textContent =
+        "Sent mail was not checked, so a message that was sent shows as deleted.";
+      area.appendChild(note);
+    }
+
+    const wrap = document.createElement("div");
+    wrap.className = "table-wrap";
+    const table = document.createElement("table");
+    table.className = "grid";
+    const head = table.createTHead().insertRow();
+    ["Status", "Address", "Subject", "Date", "Re-emailed"].forEach((title) => {
+      const cell = document.createElement("th");
+      cell.textContent = title;
+      head.appendChild(cell);
+    });
+    const body = table.createTBody();
+    result.rows.forEach((row) => {
+      const line = body.insertRow();
+      const pill = document.createElement("span");
+      pill.className = `status-pill status-${row.status}`;
+      pill.textContent = row.label;
+      line.insertCell().appendChild(pill);
+      [row.email, row.subject, row.when, row.re_emailed].forEach((value) => {
+        line.insertCell().textContent = value || "";
+      });
+    });
+    wrap.appendChild(table);
+    area.appendChild(wrap);
+  } catch (error) {
+    area.textContent = "";
+    const message = document.createElement("div");
+    message.className = "error";
+    message.textContent = error.message;
+    area.appendChild(message);
+  }
+}
+
+// Tracking sheet
+
+// Columns the user can type into. The rest come from the CSV and the mailbox.
+const SHEET_EDITABLE = ["client", "status", "linkedin", "re_emailed", "assignee", "notes"];
+
+async function buildSheet() {
+  if (!state.csvId) {
+    toast("Load a CSV first, on the Compose tab", true);
+    return;
+  }
+  el("sheet-status").textContent = "Building rows from Gmail";
+  try {
+    const result = await postJson("/api/tracker", {
+      csv_id: state.csvId,
+      default_assignee: el("sheet-assignee").value,
+    });
+    state.sheetRows = result.rows;
+    renderSheet(result.columns, result.rows);
+    el("sheet-tsv").value = result.tsv;
+    el("sheet-status").textContent = `${result.rows.length} row(s)`;
+    el("sheet-status").className = "hint";
+  } catch (error) {
+    el("sheet-status").textContent = error.message;
+    el("sheet-status").className = "error";
+  }
+}
+
+function renderSheet(columns, rows) {
+  const table = el("sheet-table");
+  table.textContent = "";
+  const head = table.createTHead().insertRow();
+  columns.forEach((title) => {
+    const cell = document.createElement("th");
+    cell.textContent = title;
+    head.appendChild(cell);
+  });
+
+  // Field order has to match the column order the server sends.
+  const order = [
+    "client",
+    "status",
+    "name",
+    "title",
+    "email",
+    "linkedin",
+    "re_emailed",
+    "assignee",
+    "notes",
+    "last_contact",
+  ];
+  const body = table.createTBody();
+  rows.forEach((row, index) => {
+    const line = body.insertRow();
+    order.forEach((field) => {
+      const cell = line.insertCell();
+      if (!SHEET_EDITABLE.includes(field)) {
+        cell.textContent = row[field] || "";
+        return;
+      }
+      const input = document.createElement("input");
+      input.type = "text";
+      input.value = row[field] || "";
+      input.dataset.field = field;
+      input.dataset.row = String(index);
+      input.addEventListener("input", () => {
+        state.sheetRows[index][field] = input.value;
+        el("sheet-tsv").value = sheetToTsv(columns, order);
+      });
+      cell.appendChild(input);
+    });
+  });
+  el("sheet-tsv").value = sheetToTsv(columns, order);
+}
+
+function sheetToTsv(columns, order) {
+  const clean = (value) => String(value || "").replace(/[\t\r\n]+/g, " ").trim();
+  const lines = [columns.join("\t")];
+  state.sheetRows.forEach((row) => {
+    lines.push(order.map((field) => clean(row[field])).join("\t"));
+  });
+  return lines.join("\n");
+}
+
+async function saveSheetFields() {
+  if (!state.sheetRows.length) {
+    toast("Build the rows first", true);
+    return;
+  }
+  try {
+    const result = await postJson("/api/tracker/save", {
+      entries: state.sheetRows.map((row) => ({
+        email: row.email,
+        client: row.client,
+        assignee: row.assignee,
+        notes: row.notes,
+        re_emailed: row.re_emailed,
+        linkedin: row.linkedin,
+        status_override: row.status,
+      })),
+    });
+    toast(`Remembered values for ${result.saved} contact(s)`);
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
+async function copySheet() {
+  const text = el("sheet-tsv").value;
+  if (!text.trim()) {
+    toast("Build the rows first", true);
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    toast("Copied. Paste into Google Sheets with the first cell selected.");
+  } catch (error) {
+    // Clipboard access needs a secure context, which plain http may not be.
+    el("sheet-tsv").select();
+    toast("Could not copy automatically. The text is selected, press Cmd C.", true);
+  }
+}
+
 // Wiring
 
 function wire() {
@@ -889,6 +1191,17 @@ function wire() {
   el("suppression-input").addEventListener("keydown", (event) => {
     if (event.key === "Enter") addSuppression();
   });
+
+  VIEWS.forEach((view) => {
+    el(`view-${view}`).addEventListener("click", () => showView(view));
+  });
+  el("toggle-library").addEventListener("click", () => {
+    el("library-list").classList.toggle("hidden");
+  });
+  el("refresh-status").addEventListener("click", loadStatus);
+  el("build-sheet").addEventListener("click", buildSheet);
+  el("save-sheet").addEventListener("click", saveSheetFields);
+  el("copy-sheet").addEventListener("click", copySheet);
 }
 
 wire();
@@ -896,3 +1209,4 @@ renderChips(defaultFields());
 refreshStatus();
 loadBatches();
 loadSuppression();
+loadLibrary();

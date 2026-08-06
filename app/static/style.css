@@ -283,8 +283,86 @@ textarea:focus {
   font-size: 13.5px;
 }
 
+.viewtabs {
+  display: flex;
+  gap: 2px;
+  padding: 0 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 53px;
+  z-index: 9;
+}
+
+.viewtab {
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 500;
+  padding: 10px 14px;
+  cursor: pointer;
+}
+
+.viewtab:hover {
+  color: var(--text);
+}
+
+.viewtab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
 .table-wrap {
   margin-top: 10px;
+  overflow-x: auto;
+}
+
+/* A cell whose value differs from the uploaded file. */
+.grid input.edited {
+  background: #fff8e1;
+  border-color: #e0c56b;
+}
+
+.status-pill {
+  display: inline-block;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.status-draft {
+  color: var(--muted);
+}
+
+.status-scheduled {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
+.status-sent {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+
+.status-deleted {
+  color: var(--danger);
+  border-color: var(--danger);
+  text-decoration: line-through;
+}
+
+.count-chip {
+  font-size: 12.5px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
 }
 
 .grid {

@@ -38,10 +38,13 @@ from .history import (
     load_suppression_list,
     normalize_address,
 )
+from .library import CsvLibrary, apply_saved_edits
+from .mailbox import STATUS_LABELS, read_scheduled, scheduled_by_address
 from .markup import looks_like_markdown, render_markdown
 from .message import Attachment
 from .store import BatchStore, load_settings, save_settings
 from .templating import KNOWN_FIELDS, find_placeholders
+from .tracker import COLUMNS, TrackerFields, build_rows, merge_states, to_tsv
 
 # Contact fields the table lets you edit. Other CSV columns stay as imported.
 EDITABLE_FIELDS = ("email", "first_name", "last_name", "company", "title")
@@ -88,10 +91,15 @@ def create_app(paths: Paths | None = None) -> Flask:
     app.config["PATHS"] = resolved
 
     store = BatchStore(resolved.batches)
+    library = CsvLibrary(resolved.library)
+    tracker = TrackerFields(resolved.tracker_file)
     # Parsed CSVs and staged attachments, keyed by the id handed to the browser.
     csv_cache: dict[str, ParseResult] = {}
     csv_names: dict[str, str] = {}
     attachment_cache: dict[str, list[Attachment]] = {}
+    # Which saved list an upload came from, and which of its rows were edited.
+    csv_lists: dict[str, str] = {}
+    csv_edited: dict[str, dict[int, list[str]]] = {}
 
     def build_guard(service, *, skip_previously_emailed: bool = True) -> ContactGuard:
         """Assemble the prior contact check for one run.
@@ -103,10 +111,14 @@ def create_app(paths: Paths | None = None) -> Flask:
         """
         checker = SentMailChecker(service, enabled=bool(skip_previously_emailed))
         live_ids, _reason = fetch_live_draft_ids(service)
+        # Scheduled messages are held outside the drafts list, so they need their own
+        # lookup or a pending send would be duplicated.
+        scheduled, _scheduled_error = read_scheduled(service)
         return ContactGuard(
             history=build_history_index(store.list_batches(), live_draft_ids=live_ids),
             suppression=load_suppression_list(resolved.suppression_file),
             sent_checker=checker,
+            scheduled=scheduled_by_address(scheduled),
         )
 
     def service_or_error() -> tuple[GmailDraftService | None, tuple]:
@@ -217,10 +229,27 @@ def create_app(paths: Paths | None = None) -> Flask:
         csv_names[csv_id] = secure_filename(uploaded.filename) or "contacts.csv"
         session["csv_id"] = csv_id
 
+        # Remember the upload so the list can be reused without the file. Failing to
+        # save is not worth losing the upload over, so it is reported, not raised.
+        saved_list_id = ""
+        try:
+            entry = library.save_upload(name=csv_names[csv_id], raw=raw, row_count=len(parsed.contacts))
+            saved_list_id = entry.list_id
+            csv_lists[csv_id] = entry.list_id
+            # A returning file brings its earlier edits back with it.
+            if entry.edits or entry.removed:
+                kept, edited = apply_saved_edits(parsed.contacts, entry)
+                parsed.contacts[:] = kept
+                csv_edited[csv_id] = edited
+        except OSError:
+            saved_list_id = ""
+
         return jsonify(
             {
                 "ok": True,
                 "csv_id": csv_id,
+                "saved_list_id": saved_list_id,
+                "edited_rows": {str(index): names for index, names in csv_edited.get(csv_id, {}).items()},
                 "filename": csv_names[csv_id],
                 "contact_count": len(parsed.contacts),
                 "skipped": [
@@ -318,6 +347,20 @@ def create_app(paths: Paths | None = None) -> Flask:
                 removed = len(parsed.contacts) - len(kept)
                 parsed.contacts[:] = kept
 
+        # Persist the edits against the saved list so they come back next time.
+        list_id = csv_lists.get(csv_id, "")
+        if list_id:
+            changed = {
+                int(edit["index"]): {name: str(edit[name]) for name in EDITABLE_FIELDS if name in edit}
+                for edit in edits
+                if isinstance(edit, dict) and str(edit.get("index", "")).isdigit()
+            }
+            library.record_edits(
+                list_id,
+                edits=changed,
+                removed=[int(item) for item in (removals or []) if str(item).isdigit()],
+            )
+
         return jsonify(
             {
                 "ok": True,
@@ -325,8 +368,62 @@ def create_app(paths: Paths | None = None) -> Flask:
                 "removed": removed,
                 "rejected": rejected,
                 "contact_count": len(parsed.contacts),
+                "saved_to_library": bool(list_id),
             }
         )
+
+    @app.get("/api/library")
+    def get_library():
+        """List remembered uploads, most recently used first."""
+        return jsonify({"ok": True, "lists": [item.to_dict() for item in library.list_all()]})
+
+    @app.post("/api/library/<list_id>/load")
+    def load_saved_list(list_id: str):
+        """Reload a remembered upload with its edits replayed."""
+        entry = library.load(list_id)
+        raw = library.read_csv(list_id)
+        if entry is None or raw is None:
+            return jsonify({"ok": False, "error": "No such saved list."}), 404
+
+        parsed = parse_csv(_decode_csv(raw), MAX_CONTACTS)
+        kept, edited = apply_saved_edits(parsed.contacts, entry)
+        parsed.contacts[:] = kept
+
+        csv_id = secrets.token_urlsafe(12)
+        csv_cache[csv_id] = parsed
+        csv_names[csv_id] = entry.name
+        csv_lists[csv_id] = list_id
+        csv_edited[csv_id] = edited
+        session["csv_id"] = csv_id
+        library.touch(list_id)
+
+        return jsonify(
+            {
+                "ok": True,
+                "csv_id": csv_id,
+                "filename": entry.name,
+                "contact_count": len(parsed.contacts),
+                "edited_rows": {str(index): names for index, names in edited.items()},
+                "removed_count": len(entry.removed),
+                "headers": parsed.headers,
+                "detected": parsed.detected,
+                "available_fields": sorted({key for c in parsed.contacts for key in c.as_context()}),
+            }
+        )
+
+    @app.post("/api/library/<list_id>/forget-edits")
+    def forget_saved_edits(list_id: str):
+        """Drop the saved edits, leaving the original upload."""
+        if library.clear_edits(list_id) is None:
+            return jsonify({"ok": False, "error": "No such saved list."}), 404
+        return jsonify({"ok": True})
+
+    @app.post("/api/library/<list_id>/delete")
+    def delete_saved_list(list_id: str):
+        """Forget a saved upload entirely."""
+        if not library.delete(list_id):
+            return jsonify({"ok": False, "error": "No such saved list."}), 404
+        return jsonify({"ok": True})
 
     @app.post("/api/upload-attachment")
     def upload_attachment():
@@ -554,6 +651,116 @@ def create_app(paths: Paths | None = None) -> Flask:
                     stream.write(f"{address}, {note}\n" if note else f"{address}\n")
 
         return jsonify({"ok": True, "added": len(new_entries), "count": len(existing) + len(new_entries)})
+
+    @app.get("/api/message-status")
+    def message_status():
+        """Report the state of every address this app has drafted to.
+
+        Scheduled messages are included whether or not this app created them, since
+        Gmail holds them outside the drafts list.
+        """
+        service, error_response = service_or_error()
+        if service is None:
+            return error_response
+
+        scheduled, scheduled_error = read_scheduled(service)
+        live_ids, live_error = fetch_live_draft_ids(service)
+        batches = store.list_batches()
+        # Sent mail has to be consulted, or a message that has left the drafts list
+        # because it was sent would be reported as deleted.
+        checker = SentMailChecker(service, enabled=bool(request.args.get("check_sent", "1") != "0"))
+        states = merge_states(
+            scheduled=scheduled_by_address(scheduled),
+            live_draft_ids=live_ids,
+            batches=batches,
+            sent_lookup=checker.check if checker.enabled else None,
+        )
+
+        rows = [
+            {
+                "email": address,
+                "status": state.status,
+                "label": STATUS_LABELS.get(state.status, state.status),
+                "subject": state.subject,
+                "when": state.when,
+                "re_emailed": state.re_emailed,
+            }
+            for address, state in sorted(states.items())
+        ]
+        counts: dict[str, int] = {}
+        for row in rows:
+            counts[row["status"]] = counts.get(row["status"], 0) + 1
+
+        return jsonify(
+            {
+                "ok": True,
+                "rows": rows,
+                "counts": counts,
+                "total": len(rows),
+                "scheduled_total": len(scheduled),
+                "errors": [item for item in (scheduled_error, live_error) if item],
+            }
+        )
+
+    @app.post("/api/tracker")
+    def build_tracker():
+        """Build spreadsheet rows for the current CSV, ready to paste."""
+        payload = request.get_json(silent=True) or {}
+        csv_id = str(payload.get("csv_id") or session.get("csv_id") or "")
+        parsed = csv_cache.get(csv_id)
+        if parsed is None:
+            return jsonify({"ok": False, "error": "Upload a CSV first."}), 400
+
+        service, error_response = service_or_error()
+        if service is None:
+            return error_response
+
+        scheduled, scheduled_error = read_scheduled(service)
+        live_ids, _live_error = fetch_live_draft_ids(service)
+        checker = SentMailChecker(service, enabled=bool(payload.get("check_sent", True)))
+        states = merge_states(
+            scheduled=scheduled_by_address(scheduled),
+            live_draft_ids=live_ids,
+            batches=store.list_batches(),
+            sent_lookup=checker.check if checker.enabled else None,
+        )
+
+        rows = build_rows(
+            parsed.contacts,
+            states=states,
+            saved=tracker,
+            default_assignee=str(payload.get("default_assignee", "")),
+        )
+        return jsonify(
+            {
+                "ok": True,
+                "columns": list(COLUMNS),
+                "rows": [row.to_dict() for row in rows],
+                "cells": [row.as_cells() for row in rows],
+                "tsv": to_tsv(rows, include_header=bool(payload.get("include_header", True))),
+                "errors": [item for item in (scheduled_error,) if item],
+            }
+        )
+
+    @app.post("/api/tracker/save")
+    def save_tracker_fields():
+        """Remember the spreadsheet values typed for one or more contacts."""
+        payload = request.get_json(silent=True) or {}
+        entries = payload.get("entries")
+        if not isinstance(entries, list) or not entries:
+            return jsonify({"ok": False, "error": "No entries given."}), 400
+
+        saved = 0
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            email = str(entry.get("email", ""))
+            if not email:
+                continue
+            tracker.update(email, entry)
+            saved += 1
+        tracker.save()
+        return jsonify({"ok": True, "saved": saved, "remembered": tracker.count()})
 
     @app.get("/api/batches")
     def list_batches():

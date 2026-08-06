@@ -31,6 +31,10 @@ class FakeGmail:
     search_failures: set[str] = field(default_factory=set)
     searches: list[str] = field(default_factory=list)
     list_drafts_fails: bool = False
+    # Messages Gmail is holding to send later, as dicts with to, subject, date, and
+    # optionally cc. Shaped this way so a test can write one line per message.
+    scheduled: list[dict] = field(default_factory=list)
+    scheduled_fails: bool = False
     counter: int = 0
 
     def profile_email(self) -> str:
@@ -41,6 +45,29 @@ class FakeGmail:
         if self.list_drafts_fails:
             raise GmailError("could not list drafts: stubbed failure")
         return set(self.drafts)
+
+    def list_scheduled(self, *, limit: int = 500) -> list[dict]:
+        """Messages held for a later send, in the metadata shape Gmail returns."""
+        if self.scheduled_fails:
+            raise GmailError("could not search sent mail: stubbed failure")
+
+        messages = []
+        for index, item in enumerate(self.scheduled):
+            headers = [
+                {"name": "To", "value": item.get("to", "")},
+                {"name": "Subject", "value": item.get("subject", "")},
+                {"name": "Date", "value": item.get("date", "")},
+            ]
+            if item.get("cc"):
+                headers.append({"name": "Cc", "value": item["cc"]})
+            messages.append(
+                {
+                    "id": item.get("id", f"sched-{index}"),
+                    "internalDate": "0",
+                    "payload": {"headers": headers},
+                }
+            )
+        return messages
 
     def search_sent(self, query: str, *, limit: int = 20) -> list[dict]:
         """Return metadata format messages for any address named in the query."""

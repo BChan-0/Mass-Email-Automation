@@ -27,6 +27,7 @@ from .history import (
     load_suppression_list,
     normalize_address,
 )
+from .mailbox import read_scheduled, scheduled_by_address
 from .message import Attachment
 from .store import BatchStore, load_settings
 
@@ -77,10 +78,13 @@ def _guard(service, store: BatchStore, paths: Paths, *, check_sent: bool) -> Con
     :returns: a guard that blocks anyone contacted before
     """
     live_ids, _reason = fetch_live_draft_ids(service)
+    # Scheduled messages sit outside the drafts list, so they need their own lookup.
+    scheduled, _scheduled_error = read_scheduled(service)
     return ContactGuard(
         history=build_history_index(store.list_batches(), live_draft_ids=live_ids),
         suppression=load_suppression_list(paths.suppression_file),
         sent_checker=SentMailChecker(service, enabled=check_sent),
+        scheduled=scheduled_by_address(scheduled),
     )
 
 

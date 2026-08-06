@@ -12,6 +12,7 @@ rows with no usable address. Every dropped row is reported with a reason.
 ## What it does
 
 - Upload a CSV and match name, email, company, and title columns automatically
+- Remember every list you upload, so it can be reloaded with your edits intact
 - Review contacts in a table, correct any cell, and drop rows you do not want
 - Write a subject, message, and sign off with `{{placeholders}}` per contact
 - Write in Markdown for bold, italics, lists, and links
@@ -21,6 +22,8 @@ rows with no usable address. Every dropped row is reported with a reason.
 - Skip anyone this account has emailed before, and report when that was
 - Keep a do not contact list that is never drafted to
 - Delete a whole batch, or selected drafts, when a batch is not good
+- Track every message as draft, scheduled to send, sent, or deleted
+- Build tracking spreadsheet rows to paste into Google Sheets
 - Save a default template and sign off for the next session
 
 ## Requirements
@@ -101,9 +104,10 @@ The app requests two scopes:
 
 - `gmail.compose`, "manage drafts and send emails". Used to create and delete
   drafts. This app never calls the send endpoint.
-- `gmail.readonly`, "view your email messages and settings". Used only to search
-  sent mail for people you have already emailed, and only message headers are
-  read, never bodies. The narrower `gmail.metadata` scope cannot be used because
+- `gmail.readonly`, "view your email messages and settings". Used to search sent
+  mail for people you have already emailed and to find messages Gmail is holding to
+  send later. Only message headers are read, never bodies. The narrower
+  `gmail.metadata` scope cannot be used because
   Google does not allow a search query with it, which would mean walking the whole
   mailbox instead.
 
@@ -111,10 +115,11 @@ Google classifies both as restricted, which matters only if you publish the app 
 other people. While it stays in testing with you as the test user, no review is
 involved.
 
-If you would rather not grant read access, remove `READ_SCOPE` from
-`GMAIL_SCOPES` in `app/config.py` and re-authorize. Everything still works except
-the sent mail search; the do not contact list and this app's own history do not
-need the read scope.
+If you would rather not grant read access, remove `READ_SCOPE` from `GMAIL_SCOPES`
+in `app/config.py` and re-authorize. The sent mail search and scheduled message
+detection stop working, which means someone with a pending scheduled send could be
+drafted to twice. The do not contact list, this app's own history, and the live
+draft check all keep working, since listing drafts needs only the compose scope.
 
 Because the app is unverified, Google shows a warning at sign in. Click Advanced,
 then "Go to ... (unsafe)". The app is your own code running on your own machine.
@@ -228,6 +233,73 @@ Same operations without a browser.
 
 Arguments not given fall back to whatever was saved from the UI.
 
+## The three tabs
+
+`Compose` builds and sends drafts. `Message status` shows what has happened to
+every message. `Tracking sheet` builds the rows for the outreach spreadsheet.
+
+## Remembered lists
+
+Every upload is kept, so a list can be reused without finding the file again.
+Click `Saved lists` under the file picker, then `Load` on any entry.
+
+A reloaded list comes back with your edits already applied, and every edited cell
+is shaded so it is clear what differs from the export. Re-uploading the same file
+finds the existing entry by its contents and brings the same edits back, rather
+than starting a second copy.
+
+The original upload is stored byte for byte and never overwritten. `Forget edits`
+returns a list to exactly what Apollo produced, and `Delete` forgets it entirely.
+
+Saved lists live under `data/library/`, capped at the 50 most recently used.
+
+## Message status
+
+The status tab lists every address this app has drafted to, with what happened to
+the message.
+
+| Status | Meaning |
+|---|---|
+| Draft | Sitting in Gmail, no send time set |
+| Scheduled to send | Gmail is holding it for a later time |
+| Sent | In sent mail |
+| Deleted | Created and then deleted, and no longer in Gmail |
+
+Scheduled messages are found through the `in:scheduled` search rather than the
+drafts list, because Gmail keeps them out of that list and gives them no label of
+their own. That means scheduled messages created by any tool are counted, not only
+this app's.
+
+Sent mail has to be checked to tell a sent message from a deleted one, since both
+have left the drafts list. Untick that box for a faster read and those rows show as
+deleted instead.
+
+## Tracking sheet
+
+The sheet tab builds one row per contact in the loaded CSV, in the column order the
+outreach spreadsheet uses:
+
+`Client`, `Status`, `Contact Name`, `Contact Title`, `Contact Email`,
+`Contact LinkedIn`, `Re-Emailed?`, `HPL Assignee`, `Notes`,
+`Date of most recent contact`
+
+Everything is filled in where the app has a value. Client comes from the subject
+line, which follows `[Harvard Product Lab x CLIENT]`, falling back to the company
+column. Status and the contact date come from the mailbox. LinkedIn comes from the
+CSV. Notes is always left blank for you.
+
+A contact with no value for a column gets an empty cell rather than being left out,
+so the columns stay aligned when pasted.
+
+Client, Status, LinkedIn, Re-Emailed, Assignee, and Notes can be typed over in the
+table. `Remember my entries` saves them against the contact's address, and they
+come back the next time that address appears in any list, in `data/tracker.json`.
+
+`Copy for Sheets` puts the rows on the clipboard as tab separated text. In Google
+Sheets, click the first cell and paste; each value lands in its own column with no
+import step. The text box below holds the same thing in case the browser blocks
+clipboard access, which happens on plain http.
+
 ## Editing contacts before drafting
 
 `Show contact table` lists every parsed contact with the email, name, company, and
@@ -279,6 +351,7 @@ since nothing was sent and there is no longer a pending message to duplicate.
 | Source | What it catches | Cleared by |
 |---|---|---|
 | Gmail sent mail | Anything sent from this account, including by hand or from a phone | Nothing, a sent message stays sent |
+| Scheduled messages | Anyone Gmail is holding a message for | Cancelling the scheduled send |
 | Live drafts | Addresses with a draft from an earlier batch still in the mailbox | Deleting the draft |
 | Do not contact list | Addresses you added by hand | Removing the line from the file |
 
@@ -366,7 +439,10 @@ does not need Gmail credentials:
 | `app/contacts.py` | CSV parsing and column matching |
 | `app/templating.py` | Placeholder substitution |
 | `app/history.py` | Prior contact checks and the do not contact list |
+| `app/library.py` | Remembered uploads and the edits saved against them |
+| `app/mailbox.py` | Reading draft, scheduled, and sent state from Gmail |
 | `app/markup.py` | Markdown rendering and HTML sanitizing |
+| `app/tracker.py` | Tracking spreadsheet rows and remembered field values |
 | `app/drafts.py` | Rendering and batch create and delete |
 | `app/gmail_client.py` | OAuth and Gmail draft calls |
 | `app/message.py` | MIME assembly |

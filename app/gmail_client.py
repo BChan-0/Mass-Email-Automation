@@ -14,12 +14,16 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-from .config import GMAIL_SCOPES
+from .config import GMAIL_SCOPES, SCHEDULED_SEARCH_QUERY
 from .message import encode_message
 
 # Gmail returns these when the per user rate limit is hit; the request itself is fine.
 RETRYABLE_STATUS = frozenset({403, 429, 500, 502, 503, 504})
 MAX_ATTEMPTS = 5
+
+# Headers fetched for a message. Bodies are never requested. Subject is included so
+# the status view can name a message without a second call.
+METADATA_HEADERS = ["To", "Cc", "Bcc", "Delivered-To", "Date", "Subject", "From"]
 
 
 class AuthError(RuntimeError):
@@ -172,6 +176,18 @@ class GmailDraftService:
             if not page_token:
                 return identifiers
 
+    def list_scheduled(self, *, limit: int = 500) -> list[dict]:
+        """Return header metadata for messages Gmail is holding to send later.
+
+        Scheduled messages are not in the drafts list and carry no system label, so
+        the ``in:scheduled`` search is the only way to find them. Their Date header
+        holds the send time Gmail will use.
+
+        :param limit: how many scheduled messages to inspect
+        :returns: messages in metadata format, empty when none are scheduled
+        """
+        return self.search_sent(SCHEDULED_SEARCH_QUERY, limit=limit)
+
     def search_sent(self, query: str, *, limit: int = 20) -> list[dict]:
         """Search the mailbox and return message headers for the matches.
 
@@ -201,7 +217,7 @@ class GmailDraftService:
                             userId="me",
                             id=message_id,
                             format="metadata",
-                            metadataHeaders=["To", "Cc", "Bcc", "Delivered-To", "Date"],
+                            metadataHeaders=METADATA_HEADERS,
                         )
                     ),
                     f"could not read message {message_id}",

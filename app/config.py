@@ -19,6 +19,10 @@ GMAIL_SCOPES = [COMPOSE_SCOPE, READ_SCOPE]
 # meaning of "ever emailed" stays in one place.
 SENT_SEARCH_QUERY = "in:sent to:{email}"
 
+# Messages Gmail is holding to send later. They are not in the drafts list and carry
+# no system label, so this search is the only way to find them.
+SCHEDULED_SEARCH_QUERY = "in:scheduled"
+
 # Sent mail lookups cost one API call per contact, so a large list takes a while.
 # Warn past this many contacts rather than silently stalling.
 HISTORY_SLOW_THRESHOLD = 250
@@ -62,6 +66,16 @@ class Paths:
         return self.data / "do-not-contact.txt"
 
     @property
+    def library(self) -> Path:
+        """Remembered CSV uploads and the edits made to them."""
+        return self.data / "library"
+
+    @property
+    def tracker_file(self) -> Path:
+        """Per contact spreadsheet values typed in the UI."""
+        return self.data / "tracker.json"
+
+    @property
     def client_secret_file(self) -> Path:
         return self.credentials / "client_secret.json"
 
@@ -75,7 +89,7 @@ class Paths:
         Uploaded CSVs and staged attachments are held in memory rather than on
         disk, so only settings, batch records, and credentials need a home.
         """
-        for directory in (self.data, self.batches, self.credentials):
+        for directory in (self.data, self.batches, self.library, self.credentials):
             directory.mkdir(parents=True, exist_ok=True)
 
 
