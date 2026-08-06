@@ -11,7 +11,9 @@ from dataclasses import dataclass, field
 
 PLACEHOLDER_PATTERN = re.compile(r"\{\{\s*([A-Za-z0-9_]+)\s*(?:\|([^{}]*))?\}\}")
 
-# Fields the app always provides, shown as clickable chips in the UI.
+# Placeholder names the UI offers as chips. Each is always defined in the context,
+# though a value can still be empty, which counts as missing unless a default is
+# given after a pipe.
 KNOWN_FIELDS = (
     "first_name",
     "last_name",

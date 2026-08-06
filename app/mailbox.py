@@ -1,23 +1,13 @@
 """Reading the current state of outreach messages from Gmail.
 
-Gmail exposes four states this app cares about, and they do not all work the same
-way:
+Four states matter: draft (in the drafts list), scheduled (held for a later send),
+sent, and deleted (this app created it and it is gone from Gmail).
 
-draft
-    In the drafts list, no send time set.
+Scheduled messages are the awkward one. They are absent from the drafts list and
+carry no system label, so ``in:scheduled`` is the only way to find them, and their
+Date header holds the send time rather than a creation time.
 
-scheduled
-    Held for a later send. Not in the drafts list, and Gmail gives it no system
-    label, so ``in:scheduled`` is the only way to find one. Its Date header holds
-    the time Gmail will send it.
-
-sent
-    In sent mail.
-
-deleted
-    Recorded by this app as created and then deleted, and absent from Gmail now.
-
-The status view and the prior contact check both read from here so they cannot
+The status view and the prior contact check both read from here, so they cannot
 disagree about what is pending.
 """
 

@@ -1,26 +1,22 @@
 """Prior contact checks that keep an address out of a new batch.
 
-An address is blocked when a message has actually reached the person, or when a
-draft to them is still sitting in the mailbox waiting to be sent. Deleting a draft
-undoes the block, because nothing was ever sent and there is no longer a pending
-message to duplicate.
+An address is blocked when a message reached the person, or when one is still
+pending as a draft or a scheduled send. Deleting a draft undoes the block: nothing
+was sent and there is no pending message left to duplicate.
 
-Three sources answer that:
+Four sources answer that, checked cheapest first so a suppressed address costs no
+API call:
 
-Gmail sent mail
-    Searched per address with ``in:sent to:...``, so it catches mail sent by hand,
-    from a phone, or by a different tool. Needs the read scope.
-
-Live drafts from earlier batches
-    Drafts this app created that still exist in the mailbox. Membership is confirmed
-    against Gmail's own draft list rather than trusting the local record, so a draft
-    deleted or sent directly in Gmail is judged on what is actually there.
-
-Do not contact list
-    Addresses named by hand, which are blocked whatever the mailbox holds.
+- the do not contact list, which wins whatever the mailbox holds
+- scheduled messages, from ``in:scheduled``, since Gmail keeps them out of the
+  drafts list
+- drafts from earlier batches, confirmed against Gmail's own draft list rather than
+  the local record, so one deleted or sent inside Gmail is judged on what is there
+- sent mail, searched per address, which also catches mail sent by hand or by
+  another tool
 
 A blocked address is never drafted. Each block carries the date of first contact so
-the report can say when it happened.
+the report can say when it happened. The last two need the read scope.
 """
 
 from __future__ import annotations
@@ -29,9 +25,14 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
+from typing import TYPE_CHECKING
 
 from .config import SENT_SEARCH_QUERY
 from .gmail_client import GmailError
+
+if TYPE_CHECKING:
+    # app.mailbox imports from here, so this stays a type-only import.
+    from .mailbox import ScheduledMessage
 
 # Sources are ordered by how much weight they carry in the report.
 SOURCE_SENT_MAIL = "gmail_sent"
@@ -212,7 +213,8 @@ def _message_date(message: dict) -> str:
         except (TypeError, ValueError):
             pass
 
-    # internalDate is milliseconds since the epoch and is always present.
+    # internalDate is milliseconds since the epoch. Gmail normally sets it, but the
+    # value is checked rather than assumed so a stub or a partial response is safe.
     internal = message.get("internalDate")
     if internal:
         try:
@@ -324,12 +326,11 @@ class ContactGuard:
         history: HistoryIndex | None = None,
         suppression: dict[str, str] | None = None,
         sent_checker: SentMailChecker | None = None,
-        scheduled: dict[str, object] | None = None,
+        scheduled: dict[str, ScheduledMessage] | None = None,
     ) -> None:
         self._history = history or HistoryIndex()
         self._suppression = suppression or {}
         self._sent = sent_checker
-        # Address to the scheduled message aimed at it, from app.mailbox.
         self._scheduled = scheduled or {}
 
     @property
@@ -361,7 +362,7 @@ class ContactGuard:
             return PriorContact(
                 email=email,
                 source=SOURCE_SCHEDULED,
-                first_contact=(getattr(pending, "send_at", "") or "")[:31],
+                first_contact=pending.send_at,
                 message_count=1,
                 detail="Gmail is holding a message for this address to send later",
             )
