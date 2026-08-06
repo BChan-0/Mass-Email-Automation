@@ -24,7 +24,7 @@ SENT_SEARCH_QUERY = "in:sent to:{email}"
 SCHEDULED_SEARCH_QUERY = "in:scheduled"
 
 # Sent mail lookups cost one API call per contact, so a large list takes a while.
-# Warn past this many contacts rather than silently stalling.
+# The prior contact report warns past this many contacts rather than looking stalled.
 HISTORY_SLOW_THRESHOLD = 250
 
 # Gmail rejects messages over 25 MB total, so keep attachments under that to leave

@@ -136,7 +136,7 @@ def test_editing_a_list_that_no_longer_exists_is_not_fatal(library):
 
 @pytest.mark.parametrize("list_id", ["../escape", "with/slash", ".hidden", ""])
 def test_list_ids_cannot_escape_the_directory(library, list_id):
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="invalid list id"):
         library.load(list_id)
 
 

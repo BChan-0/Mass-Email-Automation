@@ -105,7 +105,7 @@ def test_delete_record_removes_the_file(store):
 
 @pytest.mark.parametrize("batch_id", ["../escape", "with/slash", ".hidden", ""])
 def test_batch_ids_cannot_escape_the_directory(store, batch_id):
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="invalid batch id"):
         store.load(batch_id)
 
 
