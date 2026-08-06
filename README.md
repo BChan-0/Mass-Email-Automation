@@ -61,6 +61,12 @@ walkthroughs referring to "APIs and Services, OAuth consent screen" are stale.
    want to create, and Save. Skipping this makes sign in fail with
    `access_denied`, which is the most common setup mistake.
 
+   While the app's publishing status is Testing with an external user type, Google
+   expires the refresh token seven days after you consent, so Connect Gmail has to
+   be repeated weekly. Clicking Publish app on that page ends that, at the cost of
+   the unverified warning at sign in and a cap of 100 users over the project's
+   lifetime. Verification is not required below that cap.
+
 5. Create the client at
    [Google Auth platform, Clients](https://console.developers.google.com/auth/clients).
    Click Create Client, set Application type to Desktop app, name it anything,
@@ -150,7 +156,8 @@ somewhere other than the repo. `GDB_ROOT` does the same as `--root`.
 
 1. Click `Connect Gmail`. A browser window opens for Google sign in. Google will
    warn that the app is unverified because it is your own client; continue past
-   it. The token is saved to `credentials/token.json`.
+   it. The token is saved to `credentials/token.json`. Expect to repeat this weekly
+   until the app is published, as step 4 of the setup explains.
 2. Contacts: choose your CSV. The app reports how many contacts it found, which
    columns it matched, and which rows it dropped and why. Click
    `Show contact table` to check the parsed rows, fix any cell, or remove a row,
@@ -468,3 +475,6 @@ control.
 Uploaded CSVs and staged attachments are held in memory for the life of the
 process. Restarting the server clears them; saved templates and batch records
 persist on disk.
+
+`DEPLOYMENT.md` covers sharing this with a team, including why each person running
+their own copy beats hosting one.

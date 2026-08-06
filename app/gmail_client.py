@@ -47,6 +47,9 @@ class DraftRef:
 def load_credentials(token_file: Path) -> Credentials | None:
     """Load saved credentials and refresh them if they have expired.
 
+    A token that can no longer be refreshed is removed, so the UI reports a clean
+    disconnected state rather than retrying a grant that is gone.
+
     :param token_file: path to the stored OAuth token
     :returns: usable credentials, or None if the user needs to authorize
     """
@@ -63,7 +66,11 @@ def load_credentials(token_file: Path) -> Credentials | None:
         try:
             credentials.refresh(Request())
         except Exception:
-            # A revoked or expired refresh token means the user must authorize again.
+            # Refresh fails once the grant is gone. While the OAuth app's publishing
+            # status is Testing with an external user type, Google expires the refresh
+            # token seven days after consent, so this is routine rather than a fault.
+            # Publishing the app removes that expiry. See README, Google Cloud setup.
+            token_file.unlink(missing_ok=True)
             return None
         token_file.write_text(credentials.to_json(), encoding="utf-8")
         token_file.chmod(0o600)
