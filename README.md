@@ -431,6 +431,12 @@ created. Deleting a batch deletes only those ids, so drafts you wrote yourself a
 never touched. Deleted drafts stay in the record, struck through, as a history of
 the run, and no longer hold their address back.
 
+Only unsent drafts are deleted. Sending a draft removes it from the drafts list, so
+its recorded id stops resolving, and asking Gmail to delete it would return a not
+found that reads as success. Each id is confirmed against the live draft list first,
+so a message that has already gone out is skipped and reported rather than being
+relabelled as deleted. If that listing cannot be read, nothing is deleted.
+
 `Remove record` forgets a batch in this app without deleting anything in Gmail.
 Because the record is what links a draft id to an address, forgetting it also
 forgets that those addresses have a draft waiting, so a later run can draft to them

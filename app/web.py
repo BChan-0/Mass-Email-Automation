@@ -843,7 +843,11 @@ def create_app(paths: Paths | None = None) -> Flask:
 
     @app.post("/api/batches/<batch_id>/delete-drafts")
     def post_delete_drafts(batch_id: str):
-        """Delete drafts from a batch. Omit draft_ids to delete all of them."""
+        """Delete unsent drafts from a batch. Omit draft_ids to delete all of them.
+
+        Anything already sent is left alone and reported, since a sent message cannot
+        be recalled and its draft id no longer resolves.
+        """
         batch = store.load(batch_id)
         if batch is None:
             return jsonify({"ok": False, "error": "No such batch."}), 404
@@ -856,11 +860,18 @@ def create_app(paths: Paths | None = None) -> Flask:
         requested = payload.get("draft_ids")
         draft_ids = [str(item) for item in requested] if isinstance(requested, list) else None
 
-        outcome = delete_drafts(service=service, store=store, batch=batch, draft_ids=draft_ids)
+        outcome = delete_drafts(
+            service=service,
+            store=store,
+            batch=batch,
+            draft_ids=draft_ids,
+            unsent_only=bool(payload.get("unsent_only", True)),
+        )
         return jsonify(
             {
                 "ok": True,
                 "deleted": outcome.deleted,
+                "skipped": outcome.skipped,
                 "failures": outcome.failures,
                 "batch": store.load(batch_id).to_dict(),
             }

@@ -402,6 +402,72 @@ def test_delete_only_the_selected_drafts(gmail, store):
     assert remove not in gmail.drafts
 
 
+def test_a_sent_message_is_left_alone_and_reported(gmail, store):
+    # Sending removes the draft from Gmail, so its id no longer resolves. Deleting it
+    # would 404, read as success, and mark a delivered message deleted in the record.
+    contacts = [
+        Contact(email="ada@engines.example", first_name="Ada", company="Engines", title="VP"),
+        Contact(email="grace@compilers.example", first_name="Grace", company="Compilers", title="Chief"),
+    ]
+    batch = create_drafts(
+        service=gmail,
+        store=store,
+        contacts=contacts,
+        templates=make_templates(),
+        attachments=[],
+        source_name="two.csv",
+    ).batch
+    sent_id = batch.drafts[0].draft_id
+    del gmail.drafts[sent_id]
+
+    outcome = delete_drafts(service=gmail, store=store, batch=batch)
+
+    assert outcome.deleted == 1
+    assert [entry["draft_id"] for entry in outcome.skipped] == [sent_id]
+    assert "sent or removed" in outcome.skipped[0]["reason"]
+    # The record still shows it live, since nothing was deleted for it.
+    reloaded = store.load(batch.batch_id)
+    assert reloaded.drafts[0].deleted_at is None
+    assert reloaded.drafts[1].deleted_at is not None
+
+
+def test_nothing_is_deleted_when_the_draft_list_cannot_be_read(gmail, store):
+    contacts = [Contact(email="ada@engines.example", first_name="Ada", company="Engines", title="VP")]
+    batch = create_drafts(
+        service=gmail,
+        store=store,
+        contacts=contacts,
+        templates=make_templates(),
+        attachments=[],
+        source_name="one.csv",
+    ).batch
+    gmail.list_drafts_fails = True
+
+    outcome = delete_drafts(service=gmail, store=store, batch=batch)
+
+    assert outcome.deleted == 0
+    assert "could not confirm drafts" in outcome.failures[0]["error"]
+    assert len(gmail.drafts) == 1
+
+
+def test_the_confirmation_can_be_turned_off(gmail, store):
+    contacts = [Contact(email="ada@engines.example", first_name="Ada", company="Engines", title="VP")]
+    batch = create_drafts(
+        service=gmail,
+        store=store,
+        contacts=contacts,
+        templates=make_templates(),
+        attachments=[],
+        source_name="one.csv",
+    ).batch
+    gmail.list_drafts_fails = True
+
+    outcome = delete_drafts(service=gmail, store=store, batch=batch, unsent_only=False)
+
+    assert outcome.deleted == 1
+    assert outcome.skipped == []
+
+
 def test_deleting_twice_is_a_no_op(gmail, store):
     contacts = [Contact(email="ada@engines.example", first_name="Ada", company="Engines", title="VP")]
     batch = create_drafts(

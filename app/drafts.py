@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 
 from .contacts import Contact
 from .gmail_client import GmailDraftService, GmailError
-from .history import ContactGuard
+from .history import ContactGuard, fetch_live_draft_ids
 from .message import Attachment, build_message
 from .store import Batch, BatchStore, DraftRecord
 from .templating import build_context, find_placeholders, render
@@ -223,25 +223,60 @@ class DeleteOutcome:
 
     deleted: int = 0
     failures: list[dict[str, str]] = field(default_factory=list)
+    # Drafts left alone because they are no longer drafts, so they were sent.
+    skipped: list[dict[str, str]] = field(default_factory=list)
 
 
 def delete_drafts(
-    *, service: GmailDraftService, store: BatchStore, batch: Batch, draft_ids: list[str] | None = None
+    *,
+    service: GmailDraftService,
+    store: BatchStore,
+    batch: Batch,
+    draft_ids: list[str] | None = None,
+    unsent_only: bool = True,
 ) -> DeleteOutcome:
-    """Delete drafts from a batch.
+    """Delete drafts from a batch, leaving anything already sent alone.
+
+    Sending a draft removes it from the drafts list, so its recorded id no longer
+    resolves. Asking Gmail to delete that id returns 404, which reads as success and
+    would mark a message deleted in the record when it is really in the recipient's
+    inbox. Checking the live draft list first means a sent message is skipped and
+    reported, rather than quietly relabelled.
 
     :param service: authorized Gmail draft service
     :param store: where the updated batch record is written
     :param batch: the batch the drafts belong to
     :param draft_ids: specific drafts to delete, or None for every live draft
-    :returns: how many were deleted and any that failed
+    :param unsent_only: confirm each id is still a draft before deleting it
+    :returns: how many were deleted, which were skipped, and any that failed
     """
     live = {draft.draft_id for draft in batch.drafts if draft.deleted_at is None}
     targets = live if draft_ids is None else live.intersection(draft_ids)
 
     outcome = DeleteOutcome()
+    still_drafts: set[str] | None = None
+    if unsent_only and targets:
+        found, reason = fetch_live_draft_ids(service)
+        if found is None:
+            # Without the listing there is no way to tell a draft from a sent message,
+            # so nothing is deleted rather than risking the wrong call.
+            outcome.failures.append({"draft_id": "", "error": f"could not confirm drafts: {reason}"})
+            return outcome
+        still_drafts = found
+
+    by_id = {draft.draft_id: draft for draft in batch.drafts}
     removed: set[str] = set()
     for draft_id in sorted(targets):
+        if still_drafts is not None and draft_id not in still_drafts:
+            record = by_id.get(draft_id)
+            outcome.skipped.append(
+                {
+                    "draft_id": draft_id,
+                    "to": record.to if record else "",
+                    "reason": "no longer a draft, so it was sent or removed in Gmail",
+                }
+            )
+            continue
         try:
             service.delete_draft(draft_id)
         except GmailError as error:

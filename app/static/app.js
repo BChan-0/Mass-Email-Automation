@@ -869,7 +869,7 @@ function renderBatch(batch) {
   const deleteSelected = document.createElement("button");
   deleteSelected.type = "button";
   deleteSelected.className = "btn btn-small btn-danger";
-  deleteSelected.textContent = "Delete selected";
+  deleteSelected.textContent = "Delete selected unsent";
   deleteSelected.disabled = live.length === 0;
   deleteSelected.addEventListener("click", async () => {
     const ids = checkboxes.filter((box) => box.checked).map((box) => box.value);
@@ -877,17 +877,25 @@ function renderBatch(batch) {
       toast("No drafts selected", true);
       return;
     }
-    await deleteFromBatch(batch.batch_id, ids, `Delete ${ids.length} selected draft(s)?`);
+    await deleteFromBatch(
+      batch.batch_id,
+      ids,
+      `Delete ${ids.length} selected draft(s)? Anything already sent is left alone.`
+    );
   });
   actions.appendChild(deleteSelected);
 
   const deleteAll = document.createElement("button");
   deleteAll.type = "button";
   deleteAll.className = "btn btn-small btn-danger";
-  deleteAll.textContent = `Delete all ${live.length} live`;
+  deleteAll.textContent = `Delete ${live.length} unsent`;
   deleteAll.disabled = live.length === 0;
   deleteAll.addEventListener("click", async () => {
-    await deleteFromBatch(batch.batch_id, null, `Delete all ${live.length} draft(s) from this batch?`);
+    await deleteFromBatch(
+      batch.batch_id,
+      null,
+      `Delete up to ${live.length} unsent draft(s) from this batch? Anything already sent is left alone.`
+    );
   });
   actions.appendChild(deleteAll);
 
@@ -926,7 +934,11 @@ async function deleteFromBatch(batchId, draftIds, confirmMessage) {
   try {
     const body = draftIds ? { draft_ids: draftIds } : {};
     const result = await postJson(`/api/batches/${batchId}/delete-drafts`, body);
-    toast(`${result.deleted} draft(s) deleted`);
+    const parts = [`${result.deleted} draft(s) deleted`];
+    if (result.skipped?.length) {
+      parts.push(`${result.skipped.length} already sent and left alone`);
+    }
+    toast(parts.join(", "));
     if (result.failures?.length) {
       toast(`${result.failures.length} could not be deleted: ${result.failures[0].error}`, true);
     }
