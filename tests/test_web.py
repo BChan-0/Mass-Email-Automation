@@ -334,6 +334,28 @@ def test_a_saved_list_reloads_with_its_edits_highlighted(client, apollo_csv):
     assert contacts[0]["title"] == "Countess"
 
 
+def test_resending_unchanged_cells_marks_nothing_as_edited(client, apollo_csv):
+    # The table posts every editable cell on each save, so only real differences
+    # should count, or a reloaded list would highlight untouched rows.
+    first = upload(client, apollo_csv).get_json()
+    unchanged = client.get(f"/api/contacts?csv_id={first['csv_id']}").get_json()["contacts"][0]
+
+    client.post("/api/contacts", json={"csv_id": first["csv_id"], "edits": [unchanged]})
+    reloaded = client.post(f"/api/library/{first['saved_list_id']}/load", json={}).get_json()
+
+    assert reloaded["edited_rows"] == {}
+
+
+def test_only_the_changed_field_is_marked_as_edited(client, apollo_csv):
+    first = upload(client, apollo_csv).get_json()
+    row = client.get(f"/api/contacts?csv_id={first['csv_id']}").get_json()["contacts"][0]
+
+    client.post("/api/contacts", json={"csv_id": first["csv_id"], "edits": [{**row, "title": "Countess"}]})
+    reloaded = client.post(f"/api/library/{first['saved_list_id']}/load", json={}).get_json()
+
+    assert reloaded["edited_rows"] == {"0": ["title"]}
+
+
 def test_re_uploading_the_same_file_brings_its_edits_back(client, apollo_csv):
     first = upload(client, apollo_csv).get_json()
     client.post("/api/contacts", json={"csv_id": first["csv_id"], "edits": [{"index": 0, "company": "Engines Ltd"}]})

@@ -1,9 +1,10 @@
 """Rows for the outreach tracking spreadsheet.
 
 Produces the columns the Google Sheet uses, in order, so a run can be pasted
-straight in. Everything except Notes is filled from the CSV and the mailbox; Notes
-is left blank for you to write. Any value the app does not have becomes an empty
-cell rather than being omitted, so pasted columns stay aligned.
+straight in. Most columns are filled from the CSV and the mailbox. Assignee and Notes
+come from what you type, and a saved value can override Status or Re-Emailed. Any
+value the app does not have becomes an empty cell rather than being omitted, so
+pasted columns stay aligned.
 
 Values you type per contact, such as the assignee, are saved and reused the next
 time the same address appears.
@@ -50,12 +51,6 @@ def client_from_subject(subject: str) -> str:
     """Pull the client name out of a subject line, or return an empty string."""
     found = CLIENT_FROM_SUBJECT.search(subject or "")
     return found.group(1).strip() if found else ""
-
-
-def company_domain(email: str) -> str:
-    """Return the domain of an address, used as a fallback client name."""
-    _, _, domain = normalize_address(email).partition("@")
-    return domain
 
 
 @dataclass
@@ -197,7 +192,7 @@ class MessageState:
 
     @property
     def re_emailed(self) -> str:
-        """Yes once a second distinct message has gone to this address."""
+        """Yes once a second distinct message exists, counting unsent drafts."""
         return "Yes" if len(self.message_keys) > 1 else "No"
 
 
@@ -210,7 +205,8 @@ def build_rows(
 ) -> list[TrackerRow]:
     """Assemble one row per contact.
 
-    Saved values win over anything derived, because they were typed deliberately.
+    A non-empty saved value wins over anything derived, since it was typed
+    deliberately. A cleared value falls back to the derived one.
 
     :param contacts: Contact objects from the parsed CSV
     :param states: address to mailbox state, from app.mailbox
@@ -268,7 +264,8 @@ def merge_states(
     :param scheduled: address to ScheduledMessage, from app.mailbox
     :param live_draft_ids: draft ids currently in Gmail, or None when unknown
     :param batches: batch records this app has written
-    :param sent_lookup: callable taking an address and returning a PriorContact
+    :param sent_lookup: optional callable taking an address and returning a
+        PriorContact, or None when it finds nothing
     :returns: address to state
     """
     states: dict[str, MessageState] = {}

@@ -17,7 +17,9 @@ from googleapiclient.errors import HttpError
 from .config import GMAIL_SCOPES, SCHEDULED_SEARCH_QUERY
 from .message import encode_message
 
-# Gmail returns these when the per user rate limit is hit; the request itself is fine.
+# Retried on the assumption the request itself is fine: rate limits and transient
+# server errors. Note 403 also covers scope and permission errors, which retrying
+# cannot fix.
 RETRYABLE_STATUS = frozenset({403, 429, 500, 502, 503, 504})
 MAX_ATTEMPTS = 5
 
@@ -111,7 +113,7 @@ def _reason(error: HttpError) -> str:
 
 
 def _with_retry(request_factory, description: str):
-    """Execute a Gmail request, retrying rate limits with exponential backoff.
+    """Execute a Gmail request, retrying rate limits and transient server errors.
 
     ``request_factory`` is a callable so each attempt gets a fresh request object;
     httplib2 request objects are not safe to execute twice.

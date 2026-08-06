@@ -71,11 +71,11 @@ def _service(paths: Paths) -> GmailDraftService:
 def _guard(service, store: BatchStore, paths: Paths, *, check_sent: bool) -> ContactGuard:
     """Assemble the prior contact check.
 
-    :param service: authorized service, or None when sent mail is not searched
+    :param service: authorized Gmail service
     :param store: batch records supplying this app's own history
     :param paths: layout holding the do not contact list
     :param check_sent: whether to search Gmail sent mail
-    :returns: a guard that blocks anyone contacted before
+    :returns: a guard that blocks anyone the enabled sources know about
     """
     live_ids, _reason = fetch_live_draft_ids(service)
     # Scheduled messages sit outside the drafts list, so they need their own lookup.

@@ -15,7 +15,7 @@ COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compose"
 READ_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 GMAIL_SCOPES = [COMPOSE_SCOPE, READ_SCOPE]
 
-# Prior contact older than this is still reported. Kept as a constant so the
+# No date window, so prior contact of any age counts. Kept as a constant so the
 # meaning of "ever emailed" stays in one place.
 SENT_SEARCH_QUERY = "in:sent to:{email}"
 
@@ -34,7 +34,8 @@ MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 MAX_CSV_BYTES = 25 * 1024 * 1024
 MAX_CONTACTS = 2000
 
-# Number of rendered drafts returned by the preview endpoint.
+# Default number of rendered drafts from the preview endpoint. A request may ask for
+# more, up to a clamp of 25.
 PREVIEW_LIMIT = 5
 
 
@@ -62,7 +63,10 @@ class Paths:
 
     @property
     def suppression_file(self) -> Path:
-        """Addresses never to contact, one per line. Edited by hand."""
+        """Addresses never to contact, one per line.
+
+        Appended to by the block command and the UI, and safe to edit by hand.
+        """
         return self.data / "do-not-contact.txt"
 
     @property
@@ -86,8 +90,8 @@ class Paths:
     def ensure(self) -> None:
         """Create every directory this app writes to.
 
-        Uploaded CSVs and staged attachments are held in memory rather than on
-        disk, so only settings, batch records, and credentials need a home.
+        Staged attachments are held in memory, but uploads are saved to the library,
+        so settings, batch records, saved lists, and credentials all need a home.
         """
         for directory in (self.data, self.batches, self.library, self.credentials):
             directory.mkdir(parents=True, exist_ok=True)

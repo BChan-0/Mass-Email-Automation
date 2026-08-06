@@ -146,8 +146,8 @@ class BatchStore:
         self._directory = directory
 
     def _path(self, batch_id: str) -> Path:
-        # Batch ids are generated here, never taken from user input, but the guard
-        # keeps a crafted id from escaping the batches directory.
+        # Batch ids arrive straight from URL segments, so this guard is the only thing
+        # keeping a crafted id from escaping the batches directory.
         if not batch_id or "/" in batch_id or "\\" in batch_id or batch_id.startswith("."):
             raise ValueError(f"invalid batch id: {batch_id!r}")
         return self._directory / f"{batch_id}.json"

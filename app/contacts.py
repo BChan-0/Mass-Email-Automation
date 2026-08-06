@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 
 from .templating import normalize_key
 
-# Header aliases, most specific first. Matching is done on normalized headers.
+# Header aliases, preferred name first. Matching is done on normalized headers.
 EMAIL_ALIASES = ("email", "email_address", "work_email", "primary_email", "contact_email")
 FIRST_NAME_ALIASES = ("first_name", "firstname", "given_name", "fname")
 LAST_NAME_ALIASES = ("last_name", "lastname", "family_name", "surname", "lname")
@@ -96,11 +96,11 @@ def _pick(headers: dict[str, str], aliases: tuple[str, ...], claimed: set[str]) 
 
     An exact alias match wins over a substring match, and any header already
     claimed by an earlier field is passed over. Without that, the loose substring
-    pass would match "name" inside "first_name" and treat the first name column as
-    a full name column as well.
+    pass would let a later field take a header an earlier one already used, such as
+    matching "lname" inside "fullname".
 
     :param headers: normalized header to original header
-    :param aliases: candidate names, most specific first
+    :param aliases: candidate names, preferred name first
     :param claimed: original headers already assigned to another field
     :returns: the original header to use, or None
     """
@@ -159,7 +159,8 @@ def parse_csv(text: str, max_contacts: int) -> ParseResult:
     :returns: contacts, skipped rows, and the header mapping that was detected
     """
     result = ParseResult()
-    # utf-8-sig handles the BOM Excel adds when re-saving an Apollo export.
+    # Strip the BOM Excel adds when re-saving an Apollo export, in case the caller
+    # decoded without utf-8-sig.
     reader = csv.DictReader(io.StringIO(text.lstrip("﻿")))
     if not reader.fieldnames:
         return result
@@ -172,7 +173,8 @@ def parse_csv(text: str, max_contacts: int) -> ParseResult:
             normalized[key] = name
 
     # Claimed headers accumulate so two fields never resolve to the same column.
-    # Order matters: the more specific fields are matched before the looser ones.
+    # Order matters: email and the name fields claim before the looser company and
+    # title aliases get a chance at a shared header.
     claimed: set[str] = set()
 
     def claim(aliases: tuple[str, ...]) -> str | None:

@@ -1,7 +1,7 @@
 """Flask app: upload a CSV, edit templates, preview, create drafts, delete drafts.
 
-Binds to loopback only. There is no login, so anyone who can reach the port can
-use the connected Gmail account.
+Defaults to binding loopback only. There is no login, so anyone who can reach the
+port can use the connected Gmail account.
 """
 
 from __future__ import annotations
@@ -85,8 +85,8 @@ def create_app(paths: Paths | None = None) -> Flask:
     resolved.ensure()
 
     app = Flask(__name__, static_folder="static", template_folder="templates")
-    # Session data is only a CSV cache key, so a per process key is enough; it does
-    # mean uploads do not survive a restart.
+    # Session data is only the CSV and attachment cache keys, so a per process key is
+    # enough; it does mean uploads do not survive a restart.
     app.secret_key = secrets.token_hex(32)
     app.config["MAX_CONTENT_LENGTH"] = max(MAX_CSV_BYTES, MAX_ATTACHMENT_BYTES) + (1024 * 1024)
     app.config["PATHS"] = resolved
@@ -106,9 +106,9 @@ def create_app(paths: Paths | None = None) -> Flask:
         """Assemble the prior contact check for one run.
 
         The suppression list always applies. Earlier drafts count only while they are
-        still in the mailbox, which is confirmed against Gmail's own draft list.
-        Searching sent mail is the part the user can turn off, since it costs one API
-        call per contact.
+        still in the mailbox, confirmed against Gmail's own draft list; if that listing
+        fails the local record is trusted instead. Searching sent mail is the part the
+        user can turn off, since it costs one API call per contact.
         """
         checker = SentMailChecker(service, enabled=bool(skip_previously_emailed))
         live_ids, _reason = fetch_live_draft_ids(service)
@@ -231,7 +231,8 @@ def create_app(paths: Paths | None = None) -> Flask:
         session["csv_id"] = csv_id
 
         # Remember the upload so the list can be reused without the file. Failing to
-        # save is not worth losing the upload over, so it is reported, not raised.
+        # save is not worth losing the upload over, so it is swallowed and
+        # saved_list_id comes back empty.
         saved_list_id = ""
         try:
             entry = library.save_upload(name=csv_names[csv_id], raw=raw, row_count=len(parsed.contacts))
@@ -294,8 +295,9 @@ def create_app(paths: Paths | None = None) -> Flask:
     def post_contacts():
         """Apply edits to the parsed contacts held for this upload.
 
-        Edits live only in this process, alongside the parsed CSV. The uploaded file
-        is never rewritten, so the original export stays as it was.
+        Edits apply to the parsed CSV in this process and are recorded against the
+        saved list, so they come back next time. The uploaded file is never rewritten,
+        so the original export stays as it was.
         """
         payload = request.get_json(silent=True) or {}
         csv_id = str(payload.get("csv_id") or session.get("csv_id") or "")
@@ -313,6 +315,9 @@ def create_app(paths: Paths | None = None) -> Flask:
 
         applied = 0
         rejected = []
+        # Only values that differ from what is loaded are recorded, so the browser
+        # resending every cell on each save does not mark the whole row as edited.
+        changed: dict[int, dict[str, str]] = {}
         for edit in edits:
             if not isinstance(edit, dict):
                 continue
@@ -328,6 +333,8 @@ def create_app(paths: Paths | None = None) -> Flask:
                 if field_name not in edit:
                     continue
                 value = str(edit[field_name] or "").strip()
+                if value == getattr(contact, field_name):
+                    continue
                 if field_name == "email":
                     if not is_valid_email(value):
                         rejected.append({"index": index, "email": value, "reason": "not a usable address"})
@@ -338,6 +345,7 @@ def create_app(paths: Paths | None = None) -> Flask:
                 # Keep the raw column view in step so templates referencing a CSV
                 # header see the edited value too.
                 contact.extra[field_name] = getattr(contact, field_name)
+                changed.setdefault(index, {})[field_name] = getattr(contact, field_name)
             applied += 1
 
         removed = 0
@@ -351,11 +359,6 @@ def create_app(paths: Paths | None = None) -> Flask:
         # Persist the edits against the saved list so they come back next time.
         list_id = csv_lists.get(csv_id, "")
         if list_id:
-            changed = {
-                int(edit["index"]): {name: str(edit[name]) for name in EDITABLE_FIELDS if name in edit}
-                for edit in edits
-                if isinstance(edit, dict) and str(edit.get("index", "")).isdigit()
-            }
             library.record_edits(
                 list_id,
                 edits=changed,

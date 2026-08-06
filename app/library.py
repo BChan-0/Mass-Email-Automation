@@ -1,9 +1,9 @@
 """Saved CSV uploads, so a list can be reused without finding the file again.
 
 Each saved list keeps the original upload byte for byte plus any edits made to it.
-Reloading replays those edits, and the UI marks the changed cells so it is obvious
-what differs from the export. The original is never overwritten, so a list can
-always be read back as Apollo produced it.
+Reloading replays those edits and marks the changed cells, so it is obvious what
+differs from the export. The original is never overwritten, so a list can always be
+read back as Apollo produced it.
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ class SavedList:
     last_used_at: str = ""
     row_count: int = 0
     digest: str = ""
-    # Row index to field to value, holding only cells that were changed.
+    # Row index to field to value, for cells the caller reported as changed.
     edits: dict[str, dict[str, str]] = field(default_factory=dict)
     removed: list[int] = field(default_factory=list)
 
@@ -93,6 +93,8 @@ class CsvLibrary:
         self._directory = directory
 
     def _record_path(self, list_id: str) -> Path:
+        # List ids arrive from URL segments, so this guard is what keeps a crafted id
+        # inside the library directory. _csv_path repeats it for the same reason.
         if not list_id or "/" in list_id or "\\" in list_id or list_id.startswith("."):
             raise ValueError(f"invalid list id: {list_id!r}")
         return self._directory / f"{list_id}.json"
@@ -139,7 +141,7 @@ class CsvLibrary:
         _write_json(self._record_path(entry.list_id), entry.to_dict())
 
     def _prune(self) -> None:
-        """Drop the oldest entries past the cap."""
+        """Drop the least recently used entries past the cap."""
         entries = self.list_all()
         for stale in entries[MAX_SAVED_LISTS:]:
             self.delete(stale.list_id)
@@ -171,8 +173,8 @@ class CsvLibrary:
     def record_edits(self, list_id: str, *, edits: dict[int, dict[str, str]], removed: list[int]) -> SavedList | None:
         """Store the cells that differ from the uploaded file.
 
-        Only changed cells are kept, so reloading can highlight exactly what was
-        edited rather than marking every cell as touched.
+        Whatever the caller sends is stored, so the caller is responsible for sending
+        only cells that actually differ.
         """
         entry = self.load(list_id)
         if entry is None:

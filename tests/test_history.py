@@ -122,6 +122,9 @@ def test_suppression_list_parses_notes_and_comments(paths):
         "# people who asked to be left alone\n"
         "ada@engines.example, asked not to be contacted\n"
         "grace@compilers.example\tbounced twice\n"
+        # A single space has to separate the note too, or the whole line would be
+        # stored as one key that could never match an address.
+        "jean@eniac.example moved on\n"
         "Katherine@Orbital.Example\n"
         "\n",
         encoding="utf-8",
@@ -131,8 +134,9 @@ def test_suppression_list_parses_notes_and_comments(paths):
 
     assert entries["ada@engines.example"] == "asked not to be contacted"
     assert entries["grace@compilers.example"] == "bounced twice"
+    assert entries["jean@eniac.example"] == "moved on"
     assert entries["katherine@orbital.example"] == ""
-    assert len(entries) == 3
+    assert len(entries) == 4
 
 
 def test_a_missing_suppression_file_is_empty(paths):

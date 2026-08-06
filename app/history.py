@@ -16,7 +16,8 @@ API call:
   another tool
 
 A blocked address is never drafted. Each block carries the date of first contact so
-the report can say when it happened. The last two need the read scope.
+the report can say when it happened. The scheduled and sent mail checks need the read
+scope; the other two do not.
 """
 
 from __future__ import annotations
@@ -34,7 +35,8 @@ if TYPE_CHECKING:
     # app.mailbox imports from here, so this stays a type-only import.
     from .mailbox import ScheduledMessage
 
-# Sources are ordered by how much weight they carry in the report.
+# Source keys stored on a block and shown in the report through SOURCE_LABELS. The
+# order checks happen in is set by ContactGuard.check, not by this list.
 SOURCE_SENT_MAIL = "gmail_sent"
 SOURCE_SCHEDULED = "gmail_scheduled"
 SOURCE_PRIOR_BATCH = "prior_batch"
@@ -168,9 +170,9 @@ def build_history_index(batches, exclude_batch_id: str = "", live_draft_ids: set
 def load_suppression_list(path) -> dict[str, str]:
     """Read a do not contact list.
 
-    One address per line. A comma or whitespace after the address starts a note,
-    which is shown in the report. Blank lines and lines starting with # are
-    ignored, so a list can carry comments.
+    One address per line. Anything after the address starts a note, which is shown
+    in the report. Blank lines and lines starting with # are ignored, so a list can
+    carry comments.
 
     :param path: file to read, may not exist
     :returns: normalized address to note
@@ -187,8 +189,10 @@ def load_suppression_list(path) -> dict[str, str]:
         text = line.strip()
         if not text or text.startswith("#"):
             continue
-        # The address runs until a comma, tab, or run of spaces; the rest is a note.
-        parts = re.split(r"[,\t]|\s{2,}", text, maxsplit=1)
+        # The address runs until a comma or any whitespace; the rest is a note. A
+        # single space has to count, or "a@b.example bounced" would be stored as one
+        # long key that could never match a real address.
+        parts = re.split(r"[,\s]", text, maxsplit=1)
         key = normalize_address(parts[0])
         if key:
             entries[key] = parts[1].strip() if len(parts) > 1 else ""
@@ -245,8 +249,8 @@ class SentMailChecker:
         """Return prior contact from sent mail, or None.
 
         A lookup failure returns None and is recorded in ``errors`` rather than
-        raised, so a transient API problem cannot block a whole batch. The report
-        surfaces the count so a silent all clear is never mistaken for a real one.
+        raised, so a transient API problem cannot block a whole batch. The prior contact
+        report surfaces the count, so a partial check is not read as an all clear.
         """
         if not self.enabled:
             return None
@@ -267,7 +271,7 @@ class SentMailChecker:
         return found
 
     def _search(self, key: str) -> PriorContact | None:
-        """Search sent mail for an address and summarize the oldest match."""
+        """Search sent mail for an address and summarize every confirmed match."""
         messages = self._service.search_sent(SENT_SEARCH_QUERY.format(email=key))
         if not messages:
             return None

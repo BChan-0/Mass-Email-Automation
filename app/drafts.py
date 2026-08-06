@@ -11,8 +11,8 @@ from .message import Attachment, build_message
 from .store import Batch, BatchStore, DraftRecord
 from .templating import build_context, find_placeholders, render
 
-# Consecutive failures with nothing created that mean the run should stop, since the
-# token or the quota is usually gone rather than the individual contacts being bad.
+# Gmail API failures with nothing created that mean the run should stop, since the
+# token or the quota is usually gone. Message build failures do not count toward it.
 GIVE_UP_AFTER_FAILURES = 5
 
 
@@ -135,7 +135,7 @@ def create_drafts(
     :param skip_incomplete: skip rows with unresolved placeholders instead of
         creating a draft containing raw template syntax
     :param guard: prior contact check; a blocked address is never drafted
-    :param save_every: how many drafts to create between saves
+    :param save_every: how many contacts to process between saves
     :returns: the batch record and per row counts
     """
     batch = store.new_batch(
