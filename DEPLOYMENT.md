@@ -16,29 +16,68 @@ The assessment is only triggered for an app that reaches user data
 [from or through a third-party server](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification),
 which is a reason to keep this off a server, covered below.
 
-## Recommendation: each person runs it, nothing is hosted
+## Hosting it so people sign in with their own Gmail
+
+This is four pieces of work, not a hosting setting, because the app has no concept of
+a user today.
+
+### 1. A Web application OAuth client, not a Desktop one
+
+`run_local_authorization` calls `flow.run_local_server`, which opens a browser on
+whichever machine runs it and listens on a loopback port. On a server that authorizes
+nobody. A hosted copy needs the web server flow: send the user to Google, take the code
+back on a redirect route, and exchange it.
+
+Google's rules constrain the address before any code is written. Redirect URIs
+[must use HTTPS and cannot be raw IP addresses](https://developers.google.com/identity/protocols/oauth2/web-server),
+with localhost the only exemption, so a hosted copy needs a real domain and a
+certificate. The redirect must match the registered one exactly, including scheme,
+case, and trailing slash. To get a refresh token the request needs
+`access_type=offline`, and it comes back only on the first consent, so it has to be
+stored rather than re-derived.
+
+### 2. Sign in, and a token per person
+
+`Paths.token_file` is a single `credentials/token.json`, and nothing in `app/` knows
+what a user is. Hosted as it stands, everyone would share whichever mailbox connected
+last. That needs a session tied to the Google account id rather than the address, one
+token file per user, and every path that reads `token_file` taking the signed in user.
+The same split applies to `data/`: batches, saved lists, tracker values, and the do not
+contact list are all per person today and would otherwise be shared.
+
+### 3. Somewhere to keep secrets and state
+
+The client secret cannot sit in the repo, which `.gitignore` currently enforces, so it
+moves to an environment variable. `app.secret_key` is regenerated on every start, which
+would log everyone out on each deploy, so it becomes configured. Tokens are the
+sensitive part: a host holding fifteen refresh tokens is worth attacking in a way one
+laptop is not, so they want encrypting at rest rather than sitting as plain JSON.
+
+### 4. Google's user cap, and the warning screen
+
+Verification is not needed below 100 users, but every one of them still sees the
+unverified warning and clicks through Advanced. The cap is
+[100 users for the lifetime of the project](https://support.google.com/cloud/answer/15549945)
+and cannot be reset.
+
+Hosting does change one thing: the security assessment applies to an app reaching
+restricted scope data from or through a third-party server. Local copies are out of
+scope by definition; a hosted copy is in scope the moment verification is needed.
+
+## The cheaper answer: each person runs it
 
 Every teammate installs the app on their own machine and connects their own mailbox.
+This already gets them signing in with their own Gmail, today, with no server, no
+per-user token storage to get wrong, and no assessment exposure.
 
-This is not the ambitious option, so here is why it wins. Hosting one shared copy
-would need real work first, none of which is a deployment setting:
-
-- `run_local_authorization` opens a browser on whichever machine it runs on and
-  listens on a loopback port. On a server it authorizes nobody, or the wrong person.
-  A hosted copy needs a web application client and a redirect flow instead.
-- There is one token file, `credentials/token.json`, and no concept of a user
-  anywhere in the app. Hosted as it stands, everyone would share whichever mailbox
-  connected last.
-- There is no login, and the app can create and delete drafts in the connected
-  mailbox. Anything reachable on a network needs an auth layer first.
-
-Running locally also keeps each person's Gmail token on their own disk at mode 0600,
-rather than collecting fifteen refresh tokens onto one host that is then worth
-attacking. And it keeps the app off a third-party server, so the security assessment
-stays out of scope even if the team later grows past 100 people.
+Running locally keeps each person's Gmail token on their own disk at mode 0600, rather
+than collecting fifteen refresh tokens onto one host.
 
 The one thing local copies cannot do by themselves is tell you what a teammate has
 already sent. That is the part worth building, and it does not need a server.
+
+If you want the hosted version regardless, the four pieces above are the work. They are
+worth doing deliberately rather than as a patch.
 
 ## Setup for the team
 
