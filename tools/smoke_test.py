@@ -145,10 +145,15 @@ def main() -> int:
     check("attachment removed", [item["filename"] for item in payload["attachments"]] == ["notes.txt"])
 
     print("settings")
-    code, payload = post_json("/api/settings", {"sender_name": "Smoke Test", "cc": "cc@example.com"})
-    check("settings saved", payload.get("sender_name") == "Smoke Test")
     code, payload = request("GET", "/api/settings")
-    check("settings read back", payload.get("cc") == "cc@example.com")
+    check("settings readable", code == 200 and "subject_template" in payload)
+    if WRITE_SAFE:
+        # Saving overwrites the real templates and Cc, so it only runs against a
+        # throwaway server. Writing here once left a test Cc on a real message.
+        code, payload = post_json("/api/settings", {"sender_name": "Smoke Test", "cc": "cc@example.invalid"})
+        check("settings saved", payload.get("sender_name") == "Smoke Test")
+        code, payload = request("GET", "/api/settings")
+        check("settings read back", payload.get("cc") == "cc@example.invalid")
 
     print("do not contact list")
     code, payload = request("GET", "/api/suppression")
