@@ -8,6 +8,7 @@ import pytest
 
 from app import web
 from app.store import BatchStore
+from app.tracker import COLUMNS
 
 from .conftest import FakeGmail
 
@@ -22,7 +23,11 @@ def client(paths):
 
 @pytest.fixture
 def connected(monkeypatch, paths):
-    """Make the app behave as though Gmail is authorized, backed by the stub."""
+    """Make the app behave as though Gmail is authorized, backed by the stub.
+
+    Patching is the point, so a test that never names the returned stub still has to
+    request this fixture to get past the connection check.
+    """
     gmail = FakeGmail()
     monkeypatch.setattr(web, "load_credentials", lambda _token_file: object())
     monkeypatch.setattr(web, "GmailDraftService", lambda _credentials: gmail)
@@ -302,7 +307,7 @@ def test_markdown_reaches_the_created_draft(client, connected, apollo_csv):
     )
 
     raw = next(iter(connected.drafts.values()))["raw"].decode("utf-8", "replace")
-    assert "<strong>" in raw or "strong" in raw
+    assert "<strong>Ada</strong>" in raw
 
 
 def test_an_upload_is_remembered_in_the_library(client, apollo_csv):
@@ -398,7 +403,7 @@ def test_message_status_reports_a_sent_message_rather_than_deleted(client, conne
     assert row["when"] == "2026-08-04"
 
 
-def test_message_status_needs_a_connection(client, apollo_csv):
+def test_message_status_needs_a_connection(client):
     assert client.get("/api/message-status").status_code == 401
 
 
@@ -429,9 +434,9 @@ def test_tracker_rows_cover_every_column(client, connected, apollo_csv):
 
     payload = client.post("/api/tracker", json={"csv_id": csv_id, "default_assignee": "Bonnie"}).get_json()
 
-    assert len(payload["columns"]) == 10
+    assert payload["columns"] == list(COLUMNS)
     assert len(payload["rows"]) == 3
-    assert all(len(cells) == 10 for cells in payload["cells"])
+    assert all(len(cells) == len(COLUMNS) for cells in payload["cells"])
     header, *lines = payload["tsv"].split("\n")
     assert header.split("\t") == payload["columns"]
     assert len(lines) == 3
@@ -602,7 +607,7 @@ def test_delete_selected_drafts_only(client, connected, apollo_csv):
     assert len(connected.drafts) == 2
 
 
-def test_delete_requires_a_connection(client, apollo_csv, paths):
+def test_delete_requires_a_connection(client, paths):
     store = BatchStore(paths.batches)
     batch = store.new_batch(source_name="a.csv", subject_template="s", attachment_names=[])
     store.save(batch)

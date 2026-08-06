@@ -74,7 +74,7 @@ def test_each_column_is_claimed_by_only_one_field():
     csv_text = "Email,Name,Company\na@b.example,Ada Lovelace,Engines\n"
     result = parse_csv(csv_text, max_contacts=10)
 
-    assert len(set(result.detected.values())) == len(result.detected)
+    assert result.detected == {"email": "Email", "full_name": "Name", "company": "Company"}
 
 
 def test_no_email_column_yields_no_contacts():

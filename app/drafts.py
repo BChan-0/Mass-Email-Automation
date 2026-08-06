@@ -11,6 +11,10 @@ from .message import Attachment, build_message
 from .store import Batch, BatchStore, DraftRecord
 from .templating import build_context, find_placeholders, render
 
+# Consecutive failures with nothing created that mean the run should stop, since the
+# token or the quota is usually gone rather than the individual contacts being bad.
+GIVE_UP_AFTER_FAILURES = 5
+
 
 @dataclass
 class RenderedDraft:
@@ -187,7 +191,7 @@ def create_drafts(
             outcome.failed += 1
             # Repeated failures usually mean the token or quota is gone, so give up
             # rather than burning through the rest of the list.
-            if outcome.failed >= 5 and outcome.created == 0:
+            if outcome.failed >= GIVE_UP_AFTER_FAILURES and outcome.created == 0:
                 outcome.stopped_early = True
                 break
             continue

@@ -5,7 +5,7 @@ from __future__ import annotations
 import email
 
 from app.contacts import Contact, parse_csv
-from app.drafts import TemplateSet, create_drafts, delete_drafts, render_one
+from app.drafts import GIVE_UP_AFTER_FAILURES, TemplateSet, create_drafts, delete_drafts, render_one
 from app.history import (
     SOURCE_PRIOR_BATCH,
     SOURCE_SENT_MAIL,
@@ -195,7 +195,7 @@ def test_repeated_failures_stop_the_run(gmail, store):
 
     assert outcome.stopped_early
     assert outcome.created == 0
-    assert outcome.failed == 5
+    assert outcome.failed == GIVE_UP_AFTER_FAILURES
 
 
 def test_a_previously_emailed_contact_is_never_drafted(gmail, store):

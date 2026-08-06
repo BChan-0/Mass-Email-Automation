@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import email
+from email.header import decode_header, make_header
 
 from app.message import Attachment, body_to_html, build_message, encode_message, sanitize_header
 
@@ -99,7 +100,7 @@ def test_markdown_bodies_produce_formatted_html():
 
     assert "<strong>Ada</strong>" in parts["html"].get_content()
     assert parts["html"].get_content().count("<li>") == 2
-    # The plain text part keeps the Markdown source, which reads fine as text.
+    # The plain text part keeps the Markdown source.
     assert "**Ada**" in parts["plain"].get_content()
 
 
@@ -155,5 +156,6 @@ def test_unicode_subject_and_body_survive_encoding():
     decoded = base64.urlsafe_b64decode(encode_message(message).encode("ascii"))
     parsed = email.message_from_bytes(decoded)
 
-    assert parsed["Subject"] is not None
+    # The header arrives RFC 2047 encoded, so it has to be decoded to be compared.
+    assert str(make_header(decode_header(parsed["Subject"]))) == "Café ☕"
     assert "Naïve résumé" in parsed.get_payload(decode=True).decode("utf-8")

@@ -56,6 +56,9 @@ def test_dangerous_html_is_stripped(payload):
 
     for tag in ("<script", "<img", "<iframe", "<style", "onerror", "onclick"):
         assert tag not in html.lower()
+    # The surrounding text has to survive, or returning nothing would pass.
+    assert "Hi" in html
+    assert "there" in html
 
 
 def test_a_javascript_url_is_neutralized():

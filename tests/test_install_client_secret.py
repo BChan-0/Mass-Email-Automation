@@ -100,9 +100,12 @@ def test_a_missing_source_is_reported(tmp_path, monkeypatch):
 def test_autodiscovery_picks_the_newest_usable_file(tmp_path, monkeypatch):
     downloads = tmp_path / "Downloads"
     downloads.mkdir()
-    write(downloads / "client_secret_old.json", DESKTOP_CLIENT)
+    # Distinct client ids, so the installed file shows which candidate was chosen.
+    older = {"installed": {**DESKTOP_CLIENT["installed"], "client_id": "old.apps.googleusercontent.com"}}
+    newest = {"installed": {**DESKTOP_CLIENT["installed"], "client_id": "new.apps.googleusercontent.com"}}
+    write(downloads / "client_secret_old.json", older)
     write(downloads / "client_secret_bad.json", {"client_secret": "only"})
-    newer = write(downloads / "client_secret_new.json", DESKTOP_CLIENT)
+    newer = write(downloads / "client_secret_new.json", newest)
     # Set the time rather than relying on write speed to order the files.
     os.utime(newer, (2_000_000_000, 2_000_000_000))
 
@@ -110,7 +113,8 @@ def test_autodiscovery_picks_the_newest_usable_file(tmp_path, monkeypatch):
     monkeypatch.setattr("tools.install_client_secret.SEARCH_DIRECTORIES", (downloads,))
 
     assert run([], monkeypatch) == 0
-    assert (tmp_path / "credentials" / "client_secret.json").exists()
+    installed = json.loads((tmp_path / "credentials" / "client_secret.json").read_text(encoding="utf-8"))
+    assert installed["installed"]["client_id"] == "new.apps.googleusercontent.com"
 
 
 def test_autodiscovery_reports_when_nothing_is_usable(tmp_path, monkeypatch):

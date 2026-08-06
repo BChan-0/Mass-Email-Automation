@@ -100,7 +100,7 @@ def test_fetching_live_draft_ids_reports_a_failure(gmail):
     assert "could not list drafts" in reason
 
 
-def test_fetching_live_draft_ids_without_a_service(gmail):
+def test_fetching_live_draft_ids_without_a_service():
     identifiers, reason = fetch_live_draft_ids(None)
 
     assert identifiers is None
